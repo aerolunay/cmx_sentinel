@@ -1,0 +1,25 @@
+{
+  "name": "cmx-sentinel-admin-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CMX Sentinel Admin backend - agent/group/restriction management, recordings browser, reports.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "express-mysql-session": "^3.0.3",
+    "mysql2": "^3.24.4",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5",
+    "@aws-sdk/client-s3": "^3.635.0",
+    "@aws-sdk/s3-request-presigner": "^3.635.0",
+    "nodemailer": "^10.0.10"
+  },
+  "overrides": {
+    "mysql2": "^3.24.4"
+  }
+}

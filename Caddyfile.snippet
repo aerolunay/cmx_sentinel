@@ -1,0 +1,22 @@
+# Add this block to your existing Caddyfile (alongside whatever else
+# it's already serving on this server) and reload Caddy:
+#   sudo systemctl reload caddy
+#
+# Build the frontend first: cd frontend && npm run build
+# Then point `root` below at wherever you copy the resulting dist/
+# folder on the server, e.g. /var/www/cmx-sentinel-admin/dist
+
+admin.yourdomain.com {
+    # API requests go to the Express backend...
+    handle /api/* {
+        reverse_proxy 127.0.0.1:5051
+    }
+
+    # ...everything else is the React build (client-side routing means
+    # any unmatched path should still serve index.html, not 404).
+    handle {
+        root * /var/www/cmx-sentinel-admin/dist
+        file_server
+        try_files {path} /index.html
+    }
+}
