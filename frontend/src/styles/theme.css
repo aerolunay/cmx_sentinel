@@ -5,6 +5,8 @@ body {
   color: #1a2b4a;
 }
 
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+
 header {
   background: #1a2b4a;
   color: white;
@@ -12,15 +14,36 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
-header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-.header-logo { height: 28px; width: auto; }
-nav a { color: #cbd5e1; text-decoration: none; margin-right: 20px; font-size: 14px; }
-nav a:hover, nav a.active { color: white; }
+.header-logo { height: 42px; width: auto; }
 .user-info { font-size: 13px; color: #cbd5e1; }
 .user-info a { color: #f87171; text-decoration: none; margin-left: 12px; cursor: pointer; }
 
-main { padding: 28px; max-width: 1000px; margin: 0 auto; }
+.app-version { font-size: 11px; letter-spacing: 0.5px; color: #666; }
+
+.dashboard-card {
+  background: white; border-radius: 8px; padding: 20px 24px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.dashboard-card h3 { margin: 0 0 12px; font-size: 15px; color: #1a2b4a; }
+
+.app-body { display: flex; flex: 1; }
+.sidebar {
+  width: 200px; flex-shrink: 0; background: white;
+  border-right: 1px solid #e5e7eb; padding: 20px 0;
+  display: flex; flex-direction: column;
+}
+.sidebar-brand { display: flex; flex-direction: column; gap: 4px; padding: 0 24px 24px; }
+.sidebar-title { font-size: 26px; font-weight: 700; color: #1a2b4a; letter-spacing: 0.5px; }
+.sidebar a {
+  color: #444; text-decoration: none; font-size: 14px;
+  padding: 10px 24px; border-left: 3px solid transparent;
+}
+.sidebar a:hover { background: #f3f4f6; }
+.sidebar a.active { background: #eef1f6; color: #1a2b4a; font-weight: 600; border-left-color: #1a2b4a; }
+
+main { flex: 1; padding: 28px; }
 
 table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #eee; font-size: 14px; }
@@ -48,7 +71,8 @@ th { background: #f0f2f5; font-weight: 600; }
 }
 .login-box h1 { font-size: 20px; margin: 0 0 24px; color: #1a2b4a; text-align: center; }
 .login-logo { display: block; height: 40px; width: auto; margin: 0 auto 8px; }
-.login-subtitle { text-align: center; color: #1a2b4a; font-weight: 600; font-size: 13px; margin: 0 0 24px; letter-spacing: 0.5px; text-transform: uppercase; }
+.login-subtitle { text-align: center; color: #1a2b4a; font-weight: 600; font-size: 13px; margin: 0 0 4px; letter-spacing: 0.5px; text-transform: uppercase; }
+.login-box .app-version { display: block; text-align: center; margin: 0 0 24px; }
 .login-box label { display: block; font-size: 13px; color: #444; margin-bottom: 4px; }
 .login-box input {
   width: 100%; padding: 10px; margin-bottom: 16px;

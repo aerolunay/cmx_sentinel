@@ -24,8 +24,15 @@ export const api = {
     request('/api/auth/request-otp', { method: 'POST', body: JSON.stringify({ loginIdentifier }) }),
   verifyOtp: (loginIdentifier, code) =>
     request('/api/auth/verify-otp', { method: 'POST', body: JSON.stringify({ loginIdentifier, code }) }),
+  checkUser: (loginIdentifier) =>
+    request('/api/auth/check-user', { method: 'POST', body: JSON.stringify({ loginIdentifier }) }),
+  loginTotp: (loginIdentifier, code) =>
+    request('/api/auth/login-totp', { method: 'POST', body: JSON.stringify({ loginIdentifier, code }) }),
+  totpSetup: () => request('/api/auth/totp/setup', { method: 'POST' }),
+  totpConfirm: (code) => request('/api/auth/totp/confirm', { method: 'POST', body: JSON.stringify({ code }) }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   me: () => request('/api/auth/me'),
+  getBackendVersion: () => request('/api/auth/version'),
 
   listUsers: () => request('/api/users'),
   createUser: (user) => request('/api/users', { method: 'POST', body: JSON.stringify(user) }),
@@ -56,4 +63,6 @@ export const api = {
     request(`/api/groups/${groupId}/restrictions/${restrictionId}`, { method: 'PUT', body: JSON.stringify(restriction) }),
   deleteRestriction: (groupId, restrictionId) =>
     request(`/api/groups/${groupId}/restrictions/${restrictionId}`, { method: 'DELETE' }),
+
+  getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
 };

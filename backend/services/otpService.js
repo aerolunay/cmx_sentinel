@@ -66,7 +66,7 @@ async function requestOtp(loginIdentifier) {
  */
 async function verifyOtp(loginIdentifier, code) {
   const [userRows] = await db.query(
-    "SELECT user_id, role, display_name, is_active FROM web_users WHERE login_identifier = ? OR email = ?",
+    "SELECT user_id, role, display_name, is_active, login_identifier, totp_enabled FROM web_users WHERE login_identifier = ? OR email = ?",
     [loginIdentifier, loginIdentifier]
   );
 

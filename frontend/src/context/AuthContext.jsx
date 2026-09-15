@@ -27,13 +27,23 @@ export function AuthProvider({ children }) {
     return result;
   }
 
+  async function checkUser(loginIdentifier) {
+    return api.checkUser(loginIdentifier);
+  }
+
+  async function loginTotp(loginIdentifier, code) {
+    const result = await api.loginTotp(loginIdentifier, code);
+    setUser(result);
+    return result;
+  }
+
   async function logout() {
     await api.logout();
     setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, requestOtp, verifyOtp, logout }}>
+    <AuthContext.Provider value={{ user, loading, requestOtp, verifyOtp, checkUser, loginTotp, logout, refreshUser: () => api.me().then(setUser) }}>
       {children}
     </AuthContext.Provider>
   );
