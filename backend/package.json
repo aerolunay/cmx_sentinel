@@ -13,6 +13,8 @@
     "express-session": "^1.18.0",
     "express-mysql-session": "^3.0.3",
     "mysql2": "^3.24.4",
+    "bcryptjs": "^3.0.3",
+    "luxon": "^3.7.2",
     "dotenv": "^16.4.5",
     "cors": "^2.8.5",
     "@aws-sdk/client-s3": "^3.635.0",

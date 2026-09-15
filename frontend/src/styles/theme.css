@@ -69,3 +69,37 @@ th { background: #f0f2f5; font-weight: 600; }
   margin-top: 10px; font-size: 13px;
 }
 .login-box .link-button:hover { background: none; color: #253a63; }
+
+.btn-secondary { background: #e5e7eb; color: #1a2b4a; }
+.btn-secondary:hover { background: #d1d5db; }
+.btn-link {
+  background: none; border: none; color: #1a2b4a; text-decoration: underline;
+  cursor: pointer; font-size: 13px; padding: 0;
+}
+.btn-link:hover { color: #253a63; }
+.btn-link:disabled { color: #999; cursor: default; text-decoration: none; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.modal-box {
+  background: white; border-radius: 10px; padding: 28px;
+  width: 380px; max-width: 90vw;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+.modal-box-wide { width: 640px; }
+.modal-box h2 { margin: 0 0 20px; font-size: 18px; color: #1a2b4a; }
+.modal-box label { display: block; font-size: 13px; color: #444; margin-bottom: 4px; margin-top: 14px; }
+.modal-box label:first-of-type { margin-top: 0; }
+.modal-box input, .modal-box select {
+  width: 100%; padding: 9px; border: 1px solid #ccc; border-radius: 6px;
+  box-sizing: border-box; font-size: 14px;
+}
+.modal-actions {
+  display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;
+}
+.modal-actions .btn, .modal-actions .btn-secondary {
+  padding: 9px 18px; font-size: 13px;
+}

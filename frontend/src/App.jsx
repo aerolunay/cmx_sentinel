@@ -3,11 +3,24 @@ import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import Layout from './components/Layout.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
+import UsersPage from './pages/UsersPage.jsx';
+import AgentsPage from './pages/AgentsPage.jsx';
+import RecordingsPage from './pages/RecordingsPage.jsx';
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null; // avoid a flash of the login page while checking
   if (!user) return <Navigate to="/login" replace />;
+  return children;
+}
+
+// Client-side role gating is UX only (hides a page someone shouldn't
+// see, avoids a confusing "server said no" flash) - the REAL
+// enforcement is server-side via requireRole on every API route. This
+// is not a substitute for that, just a nicer experience on top of it.
+function RequireRole({ role, children }) {
+  const { user } = useAuth();
+  if (user?.role !== role) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -24,7 +37,10 @@ function AppRoutes() {
         }
       >
         <Route index element={<DashboardPage />} />
-        {/* /users, /groups, /agents, /recordings, /reports routes added in later stages */}
+        <Route path="users" element={<RequireRole role="admin"><UsersPage /></RequireRole>} />
+        <Route path="agents" element={<RequireRole role="admin"><AgentsPage /></RequireRole>} />
+        <Route path="recordings" element={<RecordingsPage />} />
+        {/* /groups, /reports routes added in later stages */}
       </Route>
     </Routes>
   );

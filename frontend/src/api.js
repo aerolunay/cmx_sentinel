@@ -26,4 +26,20 @@ export const api = {
     request('/api/auth/verify-otp', { method: 'POST', body: JSON.stringify({ loginIdentifier, code }) }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   me: () => request('/api/auth/me'),
+
+  listUsers: () => request('/api/users'),
+  createUser: (user) => request('/api/users', { method: 'POST', body: JSON.stringify(user) }),
+  updateUser: (userId, user) => request(`/api/users/${userId}`, { method: 'PUT', body: JSON.stringify(user) }),
+  setUserStatus: (userId, isActive) =>
+    request(`/api/users/${userId}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) }),
+
+  listAgents: () => request('/api/agents'),
+  createAgent: (agent) => request('/api/agents', { method: 'POST', body: JSON.stringify(agent) }),
+  updateAgent: (agentId, agent) => request(`/api/agents/${agentId}`, { method: 'PUT', body: JSON.stringify(agent) }),
+  setAgentStatus: (agentId, isActive) =>
+    request(`/api/agents/${agentId}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) }),
+  resetAgentPassword: (agentId) => request(`/api/agents/${agentId}/reset-password`, { method: 'POST' }),
+
+  listRecordings: () => request('/api/recordings'),
+  getRecordingUrl: (key) => request(`/api/recordings/url?key=${encodeURIComponent(key)}`),
 };

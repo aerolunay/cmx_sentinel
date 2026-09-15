@@ -9,6 +9,9 @@ require("dotenv").config();
 
 const db = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
+const userRoutes = require("./routes/userRoutes");
+const agentRoutes = require("./routes/agentRoutes");
+const recordingRoutes = require("./routes/recordingRoutes");
 
 const app = express();
 
@@ -55,6 +58,9 @@ app.use(
 );
 
 app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/agents", agentRoutes);
+app.use("/api/recordings", recordingRoutes);
 
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);

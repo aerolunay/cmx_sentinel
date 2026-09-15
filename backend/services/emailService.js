@@ -12,4 +12,14 @@ async function sendOtpEmail(toEmail, code) {
   });
 }
 
-module.exports = { sendOtpEmail };
+async function sendTempPasswordEmail(toEmail, agentId, tempPassword) {
+  await transporter.sendMail({
+    from: SMTP_FROM,
+    to: toEmail,
+    subject: "CMX Sentinel - Your password has been reset",
+    text: `Your CMX Sentinel password has been reset by an administrator.\n\nAgent ID: ${agentId}\nTemporary password: ${tempPassword}\n\nYou will be required to set a new password the next time you log in.`,
+    html: `<p>Your CMX Sentinel password has been reset by an administrator.</p><p>Agent ID: <strong>${agentId}</strong><br/>Temporary password: <strong style="font-size:18px;">${tempPassword}</strong></p><p>You will be required to set a new password the next time you log in.</p>`,
+  });
+}
+
+module.exports = { sendOtpEmail, sendTempPasswordEmail };
