@@ -12,6 +12,7 @@ const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const agentRoutes = require("./routes/agentRoutes");
 const recordingRoutes = require("./routes/recordingRoutes");
+const groupRoutes = require("./routes/groupRoutes");
 
 const app = express();
 
@@ -61,6 +62,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/agents", agentRoutes);
 app.use("/api/recordings", recordingRoutes);
+app.use("/api/groups", groupRoutes);
 
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);

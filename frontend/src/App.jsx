@@ -6,6 +6,8 @@ import DashboardPage from './pages/DashboardPage.jsx';
 import UsersPage from './pages/UsersPage.jsx';
 import AgentsPage from './pages/AgentsPage.jsx';
 import RecordingsPage from './pages/RecordingsPage.jsx';
+import GroupsPage from './pages/GroupsPage.jsx';
+import GroupDetailPage from './pages/GroupDetailPage.jsx';
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
@@ -40,7 +42,9 @@ function AppRoutes() {
         <Route path="users" element={<RequireRole role="admin"><UsersPage /></RequireRole>} />
         <Route path="agents" element={<RequireRole role="admin"><AgentsPage /></RequireRole>} />
         <Route path="recordings" element={<RecordingsPage />} />
-        {/* /groups, /reports routes added in later stages */}
+        <Route path="groups" element={<RequireRole role="admin"><GroupsPage /></RequireRole>} />
+        <Route path="groups/:groupId" element={<RequireRole role="admin"><GroupDetailPage /></RequireRole>} />
+        {/* /reports route added in a later stage */}
       </Route>
     </Routes>
   );

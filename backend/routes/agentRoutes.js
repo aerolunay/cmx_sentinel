@@ -46,8 +46,11 @@ async function issueTempPassword(agentId, agentEmail) {
 router.get("/", async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT agent_id, display_name, email, is_active, must_reset_password, group_id
-       FROM agents ORDER BY display_name ASC`
+      `SELECT a.agent_id, a.display_name, a.email, a.is_active, a.must_reset_password,
+              a.group_id, g.group_name
+       FROM agents a
+       LEFT JOIN agent_groups g ON g.group_id = a.group_id
+       ORDER BY a.display_name ASC`
     );
     res.json(rows);
   } catch (err) {
@@ -57,7 +60,7 @@ router.get("/", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const { agentId, displayName, email } = req.body || {};
+  const { agentId, displayName, email, groupId } = req.body || {};
 
   if (!agentId || !EMPLOYEE_ID_PATTERN.test(agentId.trim())) {
     return res.status(400).json({ error: "Agent ID must be numeric." });
@@ -71,6 +74,10 @@ router.post("/", async (req, res) => {
 
   const trimmedAgentId = agentId.trim();
   const trimmedEmail = email.trim();
+  // Empty string / undefined means "no group" (NULL) - matches the
+  // schema's own convention (agents.group_id nullable = no website
+  // restrictions enforced).
+  const resolvedGroupId = groupId ? Number(groupId) : null;
 
   try {
     // Insert with a random throwaway hash first - issueTempPassword
@@ -80,9 +87,9 @@ router.post("/", async (req, res) => {
     const placeholderHash = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 4);
 
     await db.query(
-      `INSERT INTO agents (agent_id, display_name, email, password_hash, must_reset_password, is_active)
-       VALUES (?, ?, ?, ?, TRUE, TRUE)`,
-      [trimmedAgentId, displayName.trim(), trimmedEmail, placeholderHash]
+      `INSERT INTO agents (agent_id, display_name, email, password_hash, must_reset_password, is_active, group_id)
+       VALUES (?, ?, ?, ?, TRUE, TRUE, ?)`,
+      [trimmedAgentId, displayName.trim(), trimmedEmail, placeholderHash, resolvedGroupId]
     );
 
     await issueTempPassword(trimmedAgentId, trimmedEmail);
@@ -93,6 +100,7 @@ router.post("/", async (req, res) => {
       email: trimmedEmail,
       isActive: true,
       mustResetPassword: true,
+      groupId: resolvedGroupId,
       message: `Agent created. Temporary password sent to ${trimmedEmail}.`,
     });
   } catch (err) {
@@ -104,7 +112,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Profile fields only (display name, email) - deliberately does NOT
+// Profile fields (display name, email, group) - deliberately does NOT
 // touch the password or agent_id. agent_id is the login credential's
 // identity and shouldn't change once created; password changes only
 // happen through the explicit Reset Password action, kept separate on
@@ -112,7 +120,7 @@ router.post("/", async (req, res) => {
 // reset their credentials.
 router.put("/:agentId", async (req, res) => {
   const { agentId } = req.params;
-  const { displayName, email } = req.body || {};
+  const { displayName, email, groupId } = req.body || {};
 
   if (!displayName || !displayName.trim()) {
     return res.status(400).json({ error: "Enter a display name." });
@@ -121,15 +129,17 @@ router.put("/:agentId", async (req, res) => {
     return res.status(400).json({ error: "Enter a valid email address." });
   }
 
+  const resolvedGroupId = groupId ? Number(groupId) : null;
+
   try {
     const [result] = await db.query(
-      "UPDATE agents SET display_name = ?, email = ? WHERE agent_id = ?",
-      [displayName.trim(), email.trim(), agentId]
+      "UPDATE agents SET display_name = ?, email = ?, group_id = ? WHERE agent_id = ?",
+      [displayName.trim(), email.trim(), resolvedGroupId, agentId]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Agent not found." });
     }
-    res.json({ agentId, displayName: displayName.trim(), email: email.trim() });
+    res.json({ agentId, displayName: displayName.trim(), email: email.trim(), groupId: resolvedGroupId });
   } catch (err) {
     console.error("Error updating agent:", err);
     res.status(500).json({ error: "A server error occurred." });

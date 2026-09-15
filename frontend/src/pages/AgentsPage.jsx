@@ -79,6 +79,7 @@ export default function AgentsPage() {
               <th>Display Name</th>
               <th>Agent ID</th>
               <th>Email</th>
+              <th>Group</th>
               <th>Status</th>
               <th>Must Reset Password</th>
               <th></th>
@@ -86,13 +87,14 @@ export default function AgentsPage() {
           </thead>
           <tbody>
             {agents.length === 0 ? (
-              <tr><td colSpan={6}>No agents yet.</td></tr>
+              <tr><td colSpan={7}>No agents yet.</td></tr>
             ) : (
               agents.map((a) => (
                 <tr key={a.agent_id}>
                   <td>{a.display_name}</td>
                   <td>{a.agent_id}</td>
                   <td>{a.email || <em style={{ color: '#999' }}>none on file</em>}</td>
+                  <td>{a.group_name || <em style={{ color: '#999' }}>none</em>}</td>
                   <td>{a.is_active ? 'Active' : 'Disabled'}</td>
                   <td>{a.must_reset_password ? 'Yes' : 'No'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>

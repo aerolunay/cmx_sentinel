@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 
 // Handles BOTH create and edit - pass existingAgent to edit, omit it
@@ -13,9 +13,18 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
   const [agentId, setAgentId] = useState(existingAgent?.agent_id || '');
   const [displayName, setDisplayName] = useState(existingAgent?.display_name || '');
   const [email, setEmail] = useState(existingAgent?.email || '');
+  const [groupId, setGroupId] = useState(existingAgent?.group_id || '');
+  const [groups, setGroups] = useState([]);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api.listGroups().then(setGroups).catch(() => {
+      // Non-fatal - group assignment is optional, the rest of the form
+      // still works fine if this fails for some reason.
+    });
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -28,6 +37,7 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
         const saved = await api.updateAgent(existingAgent.agent_id, {
           displayName: displayName.trim(),
           email: email.trim(),
+          groupId: groupId || null,
         });
         onSaved(saved);
         onClose();
@@ -36,6 +46,7 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
           agentId: agentId.trim(),
           displayName: displayName.trim(),
           email: email.trim(),
+          groupId: groupId || null,
         });
         // Show the "temp password sent" confirmation before closing,
         // rather than closing immediately - the admin should actually
@@ -89,6 +100,19 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
             onChange={(e) => setEmail(e.target.value)}
             disabled={Boolean(message)}
           />
+
+          <label htmlFor="group">Group (website restrictions)</label>
+          <select
+            id="group"
+            value={groupId}
+            onChange={(e) => setGroupId(e.target.value)}
+            disabled={Boolean(message)}
+          >
+            <option value="">No group - no restrictions</option>
+            {groups.map((g) => (
+              <option key={g.group_id} value={g.group_id}>{g.group_name}</option>
+            ))}
+          </select>
 
           <div className="modal-actions">
             {message ? (

@@ -42,4 +42,18 @@ export const api = {
 
   listRecordings: () => request('/api/recordings'),
   getRecordingUrl: (key) => request(`/api/recordings/url?key=${encodeURIComponent(key)}`),
+
+  listGroups: () => request('/api/groups'),
+  createGroup: (groupName) => request('/api/groups', { method: 'POST', body: JSON.stringify({ groupName }) }),
+  updateGroup: (groupId, groupName) =>
+    request(`/api/groups/${groupId}`, { method: 'PUT', body: JSON.stringify({ groupName }) }),
+  deleteGroup: (groupId) => request(`/api/groups/${groupId}`, { method: 'DELETE' }),
+
+  listRestrictions: (groupId) => request(`/api/groups/${groupId}/restrictions`),
+  createRestriction: (groupId, restriction) =>
+    request(`/api/groups/${groupId}/restrictions`, { method: 'POST', body: JSON.stringify(restriction) }),
+  updateRestriction: (groupId, restrictionId, restriction) =>
+    request(`/api/groups/${groupId}/restrictions/${restrictionId}`, { method: 'PUT', body: JSON.stringify(restriction) }),
+  deleteRestriction: (groupId, restrictionId) =>
+    request(`/api/groups/${groupId}/restrictions/${restrictionId}`, { method: 'DELETE' }),
 };
