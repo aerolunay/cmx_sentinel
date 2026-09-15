@@ -17,6 +17,16 @@ const reportRoutes = require("./routes/reportRoutes");
 
 const app = express();
 
+// Caddy sits directly in front of this app on the SAME machine
+// (127.0.0.1) - "loopback" trusts exactly that one hop's
+// X-Forwarded-For header, not arbitrary forwarded headers from
+// anywhere. Required for express-rate-limit (see
+// middleware/rateLimiters.js) to key by the real client IP instead of
+// Caddy's own loopback address - without this, every request would
+// appear to come from the same "IP", making the rate limit either
+// useless (everyone shares one bucket) depending on how it's read.
+app.set("trust proxy", "loopback");
+
 const PORT = Number(process.env.PORT) || 5051;
 
 // Bind to localhost only - this app is never exposed directly to the

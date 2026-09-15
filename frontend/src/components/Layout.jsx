@@ -1,12 +1,15 @@
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useAppVersion } from '../hooks/useAppVersion.js';
+import AboutModal from '../modals/AboutModal.jsx';
 import logoWhite from '../assets/callmax_cover_removebg.png';
 
 export default function Layout() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
   const appVersion = useAppVersion();
+  const [showAbout, setShowAbout] = useState(false);
 
   return (
     <div className="app-shell">
@@ -51,12 +54,18 @@ export default function Layout() {
           <NavLink to="/reports" className={({ isActive }) => (isActive ? 'active' : '')}>
             Reports
           </NavLink>
+
+          <a href="#" onClick={(e) => { e.preventDefault(); setShowAbout(true); }} style={{ marginTop: 12 }}>
+            About
+          </a>
         </aside>
 
         <main>
           <Outlet />
         </main>
       </div>
+
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </div>
   );
 }

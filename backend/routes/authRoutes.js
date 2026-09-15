@@ -6,6 +6,7 @@ const QRCode = require("qrcode");
 const db = require("../config/db");
 const { requestOtp, verifyOtp } = require("../services/otpService");
 const { requireAuth } = require("../middleware/requireAuth");
+const { otpAttemptLimiter, otpRequestLimiter } = require("../middleware/rateLimiters");
 const { version: BACKEND_VERSION } = require("../package.json");
 
 const router = express.Router();
@@ -33,7 +34,7 @@ documents for the same reason: acceptable for an internal admin tool
 with known staff, would need reconsidering if this were ever exposed
 more publicly.
 */
-router.post("/check-user", async (req, res) => {
+router.post("/check-user", otpRequestLimiter, async (req, res) => {
   const { loginIdentifier } = req.body || {};
   if (!loginIdentifier) {
     return res.status(400).json({ error: "Enter your Employee ID or email address." });
@@ -51,7 +52,7 @@ router.post("/check-user", async (req, res) => {
   }
 });
 
-router.post("/request-otp", async (req, res) => {
+router.post("/request-otp", otpRequestLimiter, async (req, res) => {
   const { loginIdentifier } = req.body || {};
   if (!loginIdentifier) {
     return res.status(400).json({ error: "Enter your Employee ID or email address." });
@@ -72,7 +73,7 @@ router.post("/request-otp", async (req, res) => {
   res.json({ message: "If that account exists, a login code has been sent to its email." });
 });
 
-router.post("/verify-otp", async (req, res) => {
+router.post("/verify-otp", otpAttemptLimiter, async (req, res) => {
   const { loginIdentifier, code } = req.body || {};
   if (!loginIdentifier || !code) {
     return res.status(400).json({ error: "Enter both your identifier and the code." });
@@ -144,7 +145,7 @@ router.post("/totp/setup", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/totp/confirm", requireAuth, async (req, res) => {
+router.post("/totp/confirm", requireAuth, otpAttemptLimiter, async (req, res) => {
   const { code } = req.body || {};
   if (!code) {
     return res.status(400).json({ error: "Enter the code from your authenticator app." });
@@ -176,7 +177,7 @@ entirely - enter your identifier + the code your app is showing right
 now, done. This is the whole point of setting it up: no waiting for an
 email to arrive.
 */
-router.post("/login-totp", async (req, res) => {
+router.post("/login-totp", otpAttemptLimiter, async (req, res) => {
   const { loginIdentifier, code } = req.body || {};
   if (!loginIdentifier || !code) {
     return res.status(400).json({ error: "Enter both your identifier and the code." });
