@@ -57,6 +57,14 @@ app.use(
     secret: process.env.SESSION_SECRET,
     store: sessionStore,
     resave: false,
+    // Resets the cookie's expiry on every request that touches a
+    // session (Set-Cookie sent again with a fresh Expires each time,
+    // and express-mysql-session's own touch() keeps the store's
+    // expiry tracking in sync too) - turns maxAge below from "expires
+    // 1 hour after login regardless of activity" into "expires 1 hour
+    // after the LAST request", i.e. genuine inactivity timeout, not a
+    // fixed session length.
+    rolling: true,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
@@ -67,7 +75,7 @@ app.use(
       // false only if testing locally over plain http://.
       secure: process.env.COOKIE_SECURE !== "false",
       sameSite: "lax",
-      maxAge: 8 * 60 * 60 * 1000, // 8 hours
+      maxAge: 60 * 60 * 1000, // 1 hour of INACTIVITY, not 1 hour flat - see rolling above.
     },
   })
 );
