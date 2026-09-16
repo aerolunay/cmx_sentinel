@@ -16,6 +16,7 @@ const groupRoutes = require("./routes/groupRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const auditRoutes = require("./routes/auditRoutes");
 const violationRoutes = require("./routes/violationRoutes");
+const desktopSyncRoutes = require("./routes/desktopSyncRoutes");
 
 const app = express();
 
@@ -79,6 +80,7 @@ app.use("/api/groups", groupRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/audit-log", auditRoutes);
 app.use("/api/violations", violationRoutes);
+app.use("/api/desktop-sync", desktopSyncRoutes);
 
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
