@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import UserFormModal from '../modals/UserFormModal.jsx';
 
+function formatRole(role) {
+  if (role === 'super_admin') return 'Super Admin';
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +56,7 @@ export default function UsersPage() {
             <tr>
               <th>Display Name</th>
               <th>Role</th>
+              <th>Groups</th>
               <th>Login Identifier</th>
               <th>Email</th>
               <th>Status</th>
@@ -59,12 +65,17 @@ export default function UsersPage() {
           </thead>
           <tbody>
             {users.length === 0 ? (
-              <tr><td colSpan={6}>No users yet.</td></tr>
+              <tr><td colSpan={7}>No users yet.</td></tr>
             ) : (
               users.map((u) => (
                 <tr key={u.user_id}>
                   <td>{u.display_name}</td>
-                  <td style={{ textTransform: 'capitalize' }}>{u.role}</td>
+                  <td>{formatRole(u.role)}</td>
+                  <td>
+                    {u.groups && u.groups.length > 0
+                      ? u.groups.map((g) => g.group_name).join(', ')
+                      : <em style={{ color: '#999' }}>-</em>}
+                  </td>
                   <td>{u.login_identifier}</td>
                   <td>{u.email}</td>
                   <td>{u.is_active ? 'Active' : 'Disabled'}</td>

@@ -5,7 +5,9 @@ const { DateTime } = require("luxon");
 const { ListObjectsV2Command, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { s3, BUCKET_NAME } = require("../config/s3");
+const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
+const { getScopedGroupIds } = require("../services/groupScope");
 
 const router = express.Router();
 
@@ -78,6 +80,21 @@ router.get("/", async (req, res) => {
       .filter(Boolean)
       .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt));
 
+    // Recordings come from S3 filenames, not a DB query - so scoping
+    // by group means cross-referencing the parsed agentId against the
+    // agents table here, unlike reportRoutes.js where the JOIN does
+    // this naturally as part of the query itself.
+    const scopedGroupIds = await getScopedGroupIds(req);
+    if (scopedGroupIds !== null) {
+      if (scopedGroupIds.length === 0) {
+        return res.json([]);
+      }
+      const [agentRows] = await db.query("SELECT agent_id, group_id FROM agents");
+      const agentToGroup = new Map(agentRows.map((a) => [a.agent_id, a.group_id]));
+      const allowed = recordings.filter((r) => scopedGroupIds.includes(agentToGroup.get(r.agentId)));
+      return res.json(allowed);
+    }
+
     res.json(recordings);
   } catch (err) {
     console.error("Error listing recordings:", err);
@@ -89,6 +106,23 @@ router.get("/url", async (req, res) => {
   const { key } = req.query;
   if (!key || !key.startsWith("recordings/")) {
     return res.status(400).json({ error: "Invalid recording key." });
+  }
+
+  // The list endpoint filters what a scoped user SEES, but this
+  // endpoint is independently reachable with any key (e.g. from
+  // browser history) - must enforce scope here too, not just trust
+  // that the frontend only ever asks for keys it already showed.
+  const scopedGroupIds = await getScopedGroupIds(req);
+  if (scopedGroupIds !== null) {
+    const parsed = parseRecordingKey(key);
+    if (!parsed) {
+      return res.status(400).json({ error: "Invalid recording key." });
+    }
+    const [agentRows] = await db.query("SELECT group_id FROM agents WHERE agent_id = ?", [parsed.agentId]);
+    const agentGroupId = agentRows[0]?.group_id;
+    if (!scopedGroupIds.includes(agentGroupId)) {
+      return res.status(403).json({ error: "You do not have access to this recording." });
+    }
   }
 
   try {

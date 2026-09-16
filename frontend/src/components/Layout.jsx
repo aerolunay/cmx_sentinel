@@ -7,7 +7,8 @@ import logoWhite from '../assets/callmax_cover_removebg.png';
 
 export default function Layout() {
   const { user, logout } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isSuperAdmin = user?.role === 'super_admin';
+  const canManageAgents = user?.role === 'admin' || user?.role === 'super_admin';
   const appVersion = useAppVersion();
   const [showAbout, setShowAbout] = useState(false);
 
@@ -31,11 +32,11 @@ export default function Layout() {
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
             Dashboard
           </NavLink>
-          {/* Admin-only sections - TQA/Supervisor/Manager only get
-              Recordings + Reports, matching each role's actual access
-              (enforced server-side too via requireRole, this is just
-              hiding links someone couldn't use anyway). */}
-          {isAdmin && (
+          {/* Super Admin only - Users and Groups & Restrictions are no
+              longer reachable by regular Admin (enforced server-side
+              too via requireRole, this is just hiding links someone
+              couldn't use anyway). */}
+          {isSuperAdmin && (
             <>
               <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Users
@@ -43,8 +44,16 @@ export default function Layout() {
               <NavLink to="/groups" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Groups &amp; Restrictions
               </NavLink>
+            </>
+          )}
+          {/* Admin AND Super Admin both keep Agents. */}
+          {canManageAgents && (
+            <>
               <NavLink to="/agents" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Agents
+              </NavLink>
+              <NavLink to="/violations" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Violations
               </NavLink>
             </>
           )}
@@ -54,6 +63,11 @@ export default function Layout() {
           <NavLink to="/reports" className={({ isActive }) => (isActive ? 'active' : '')}>
             Reports
           </NavLink>
+          {isSuperAdmin && (
+            <NavLink to="/audit-log" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Audit Log
+            </NavLink>
+          )}
 
           <a href="#" onClick={(e) => { e.preventDefault(); setShowAbout(true); }} style={{ marginTop: 12 }}>
             About

@@ -9,6 +9,8 @@ import RecordingsPage from './pages/RecordingsPage.jsx';
 import GroupsPage from './pages/GroupsPage.jsx';
 import GroupDetailPage from './pages/GroupDetailPage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
+import AuditLogPage from './pages/AuditLogPage.jsx';
+import ViolationsPage from './pages/ViolationsPage.jsx';
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
@@ -21,9 +23,11 @@ function RequireAuth({ children }) {
 // see, avoids a confusing "server said no" flash) - the REAL
 // enforcement is server-side via requireRole on every API route. This
 // is not a substitute for that, just a nicer experience on top of it.
-function RequireRole({ role, children }) {
+// Accepts either a single role string or an array of allowed roles.
+function RequireRole({ role, roles, children }) {
   const { user } = useAuth();
-  if (user?.role !== role) return <Navigate to="/" replace />;
+  const allowed = roles || [role];
+  if (!allowed.includes(user?.role)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -40,12 +44,14 @@ function AppRoutes() {
         }
       >
         <Route index element={<DashboardPage />} />
-        <Route path="users" element={<RequireRole role="admin"><UsersPage /></RequireRole>} />
-        <Route path="agents" element={<RequireRole role="admin"><AgentsPage /></RequireRole>} />
+        <Route path="users" element={<RequireRole role="super_admin"><UsersPage /></RequireRole>} />
+        <Route path="agents" element={<RequireRole roles={["admin", "super_admin"]}><AgentsPage /></RequireRole>} />
         <Route path="recordings" element={<RecordingsPage />} />
-        <Route path="groups" element={<RequireRole role="admin"><GroupsPage /></RequireRole>} />
-        <Route path="groups/:groupId" element={<RequireRole role="admin"><GroupDetailPage /></RequireRole>} />
+        <Route path="groups" element={<RequireRole role="super_admin"><GroupsPage /></RequireRole>} />
+        <Route path="groups/:groupId" element={<RequireRole role="super_admin"><GroupDetailPage /></RequireRole>} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="audit-log" element={<RequireRole role="super_admin"><AuditLogPage /></RequireRole>} />
+        <Route path="violations" element={<RequireRole roles={["admin", "super_admin"]}><ViolationsPage /></RequireRole>} />
       </Route>
     </Routes>
   );

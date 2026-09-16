@@ -14,6 +14,8 @@ const agentRoutes = require("./routes/agentRoutes");
 const recordingRoutes = require("./routes/recordingRoutes");
 const groupRoutes = require("./routes/groupRoutes");
 const reportRoutes = require("./routes/reportRoutes");
+const auditRoutes = require("./routes/auditRoutes");
+const violationRoutes = require("./routes/violationRoutes");
 
 const app = express();
 
@@ -75,6 +77,8 @@ app.use("/api/agents", agentRoutes);
 app.use("/api/recordings", recordingRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/audit-log", auditRoutes);
+app.use("/api/violations", violationRoutes);
 
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);

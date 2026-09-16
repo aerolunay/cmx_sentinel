@@ -65,4 +65,8 @@ export const api = {
     request(`/api/groups/${groupId}/restrictions/${restrictionId}`, { method: 'DELETE' }),
 
   getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
+
+  listAuditLog: () => request('/api/audit-log'),
+
+  listViolations: () => request('/api/violations'),
 };

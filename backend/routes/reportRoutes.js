@@ -3,6 +3,7 @@
 const express = require("express");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
+const { getScopedGroupIds } = require("../services/groupScope");
 
 const router = express.Router();
 
@@ -34,6 +35,19 @@ router.get("/efficiency", async (req, res) => {
     if (groupId) {
       conditions.push("a.group_id = ?");
       params.push(groupId);
+    }
+
+    // Manager/Supervisor only ever see their assigned groups,
+    // regardless of what's requested above - an explicit groupId
+    // outside their scope just naturally returns zero rows (both
+    // conditions must hold), no separate validation needed.
+    const scopedGroupIds = await getScopedGroupIds(req);
+    if (scopedGroupIds !== null) {
+      if (scopedGroupIds.length === 0) {
+        return res.json([]); // scoped user with no groups assigned yet - show nothing, not everything
+      }
+      conditions.push(`a.group_id IN (${scopedGroupIds.map(() => "?").join(",")})`);
+      params.push(...scopedGroupIds);
     }
 
     // Aggregated at (agent, day, aux_code) granularity here - only

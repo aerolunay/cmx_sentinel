@@ -22,4 +22,14 @@ async function sendTempPasswordEmail(toEmail, agentId, tempPassword) {
   });
 }
 
-module.exports = { sendOtpEmail, sendTempPasswordEmail };
+async function sendViolationAlertEmail(toEmail, agentDisplayName, agentId, domain, path, blockedAt) {
+  await transporter.sendMail({
+    from: SMTP_FROM,
+    to: toEmail,
+    subject: `CMX Sentinel - Restricted site access blocked (${agentDisplayName})`,
+    text: `${agentDisplayName} (${agentId}) attempted to visit a restricted site.\n\nSite: ${domain}${path}\nTime: ${blockedAt}\n\nThe request was blocked - this is a notification only, no action was taken automatically.`,
+    html: `<p><strong>${agentDisplayName}</strong> (${agentId}) attempted to visit a restricted site.</p><p>Site: <code>${domain}${path}</code><br/>Time: ${blockedAt}</p><p>The request was blocked - this is a notification only, no action was taken automatically.</p>`,
+  });
+}
+
+module.exports = { sendOtpEmail, sendTempPasswordEmail, sendViolationAlertEmail };

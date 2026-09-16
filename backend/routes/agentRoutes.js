@@ -7,10 +7,11 @@ const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole } = require("../middleware/requireRole");
 const { sendTempPasswordEmail } = require("../services/emailService");
+const { logAction } = require("../services/auditLog");
 
 const router = express.Router();
 
-router.use(requireAuth, requireRole("admin"));
+router.use(requireAuth, requireRole("admin", "super_admin"));
 
 const EMPLOYEE_ID_PATTERN = /^\d+$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -93,6 +94,9 @@ router.post("/", async (req, res) => {
     );
 
     await issueTempPassword(trimmedAgentId, trimmedEmail);
+
+    await logAction(req, "created", "agent_credential", trimmedAgentId,
+      `Created agent ${displayName.trim()} (${trimmedAgentId}), temp password issued.`);
 
     res.status(201).json({
       agentId: trimmedAgentId,
@@ -183,6 +187,9 @@ router.post("/:agentId/reset-password", async (req, res) => {
     }
 
     await issueTempPassword(agentId, agentEmail);
+
+    await logAction(req, "updated", "agent_credential", agentId,
+      `Password reset for agent ${agentId}, temp password sent to ${agentEmail}.`);
 
     res.json({ message: `Temporary password sent to ${agentEmail}.` });
   } catch (err) {

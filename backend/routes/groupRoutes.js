@@ -4,10 +4,11 @@ const express = require("express");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole } = require("../middleware/requireRole");
+const { logAction } = require("../services/auditLog");
 
 const router = express.Router();
 
-router.use(requireAuth, requireRole("admin"));
+router.use(requireAuth, requireRole("super_admin"));
 
 router.get("/", async (req, res) => {
   try {
@@ -39,6 +40,7 @@ router.post("/", async (req, res) => {
 
   try {
     const [result] = await db.query("INSERT INTO agent_groups (group_name) VALUES (?)", [groupName.trim()]);
+    await logAction(req, "created", "group", result.insertId, `Created group "${groupName.trim()}".`);
     res.status(201).json({ group_id: result.insertId, group_name: groupName.trim(), restriction_count: 0 });
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
@@ -64,6 +66,7 @@ router.put("/:groupId", async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Group not found." });
     }
+    await logAction(req, "updated", "group", groupId, `Renamed group to "${groupName.trim()}".`);
     res.json({ group_id: Number(groupId), group_name: groupName.trim() });
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
@@ -78,6 +81,9 @@ router.delete("/:groupId", async (req, res) => {
   const { groupId } = req.params;
 
   try {
+    const [nameRows] = await db.query("SELECT group_name FROM agent_groups WHERE group_id = ?", [groupId]);
+    const groupName = nameRows[0]?.group_name ?? `#${groupId}`;
+
     // Unassign any agents currently in this group first (matches the
     // confirmation text GroupsPage.jsx shows: "Agents assigned to it
     // will become unassigned, not deleted") - don't rely on an assumed
@@ -88,6 +94,7 @@ router.delete("/:groupId", async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Group not found." });
     }
+    await logAction(req, "deleted", "group", groupId, `Deleted group "${groupName}".`);
     res.json({ deleted: true });
   } catch (err) {
     console.error("Error deleting group:", err);
@@ -122,6 +129,8 @@ router.post("/:groupId/restrictions", async (req, res) => {
       "INSERT INTO restricted_paths (group_id, domain, path_prefix, is_active) VALUES (?, ?, ?, ?)",
       [groupId, domain.trim(), (pathPrefix && pathPrefix.trim()) || "/", isActive !== false]
     );
+    await logAction(req, "created", "restriction", result.insertId,
+      `Added restriction on ${domain.trim()}${(pathPrefix && pathPrefix.trim()) || "/"} to group #${groupId}.`);
     res.status(201).json({
       restriction_id: result.insertId,
       group_id: Number(groupId),
@@ -151,6 +160,8 @@ router.put("/:groupId/restrictions/:restrictionId", async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Restriction not found." });
     }
+    await logAction(req, "updated", "restriction", restrictionId,
+      `Updated restriction to ${domain.trim()}${(pathPrefix && pathPrefix.trim()) || "/"}, active=${isActive !== false}.`);
     res.json({
       restriction_id: Number(restrictionId),
       domain: domain.trim(),
@@ -170,6 +181,7 @@ router.delete("/:groupId/restrictions/:restrictionId", async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Restriction not found." });
     }
+    await logAction(req, "deleted", "restriction", restrictionId, `Deleted restriction #${restrictionId}.`);
     res.json({ deleted: true });
   } catch (err) {
     console.error("Error deleting restriction:", err);
