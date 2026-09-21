@@ -34,33 +34,6 @@ function getTodayEastern() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
 }
 
-function addDaysToDateString(dateStr, days) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + days);
-  // Built from local getFullYear/getMonth/getDate, NOT toISOString() -
-  // toISOString() converts through UTC, which would shift the date by
-  // one for any admin whose browser timezone is AHEAD of UTC. Staying
-  // in local components the whole way avoids that entirely, matching
-  // the pure local-arithmetic approach DashboardPage.jsx's own
-  // getMonthRange already uses.
-  const yy = dt.getFullYear();
-  const mm = String(dt.getMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
-}
-
-// Mirrors the backend's own default window for the per-agent view
-// (see scheduleRoutes.js) - used here just to PRE-FILL the date
-// inputs, not to enforce anything; the person can widen or narrow
-// them freely from there, which is exactly what fixes a shift that
-// was loaded (e.g. directly via Workbench) for a date outside this
-// default range not showing up.
-function defaultAgentRange() {
-  const today = getTodayEastern();
-  return { dateFrom: addDaysToDateString(today, -30), dateTo: addDaysToDateString(today, 90) };
-}
-
 function defaultMonthRange() {
   const today = getTodayEastern();
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -69,7 +42,7 @@ function defaultMonthRange() {
 }
 
 export default function SchedulerPage() {
-  const [tab, setTab] = useState('upload'); // 'upload' | 'edit' | 'browse'
+  const [tab, setTab] = useState('upload'); // 'upload' | 'schedules'
 
   return (
     <>
@@ -79,17 +52,12 @@ export default function SchedulerPage() {
         <button className={tab === 'upload' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('upload')}>
           Mass Upload
         </button>
-        <button className={tab === 'edit' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('edit')}>
-          Edit Agent Schedule
-        </button>
-        <button className={tab === 'browse' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('browse')}>
-          All Schedules
+        <button className={tab === 'schedules' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('schedules')}>
+          Agent Schedules
         </button>
       </div>
 
-      {tab === 'upload' && <MassUploadTab />}
-      {tab === 'edit' && <EditScheduleTab />}
-      {tab === 'browse' && <BrowseSchedulesTab />}
+      {tab === 'upload' ? <MassUploadTab /> : <AgentSchedulesTab />}
     </>
   );
 }
@@ -170,221 +138,19 @@ function MassUploadTab() {
   );
 }
 
-function EditScheduleTab() {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState(null); // { agent_id, display_name }
-  const [range, setRange] = useState(defaultAgentRange());
-  const [shifts, setShifts] = useState([]);
-  const [loadingShifts, setLoadingShifts] = useState(false);
-  const [error, setError] = useState('');
-  const [modalShift, setModalShift] = useState(undefined); // undefined = closed, null = add, object = edit
-
-  // Debounced search-as-you-type by Agent ID or Agent Name, same
-  // 300ms pattern that avoids firing a request on every keystroke.
-  useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const data = await api.searchScheduleAgents(query.trim());
-        setResults(data);
-      } catch {
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  async function selectAgent(agent) {
-    setSelectedAgent(agent);
-    setResults([]);
-    setQuery('');
-    await loadShifts(agent.agent_id, range);
-  }
-
-  async function loadShifts(agentId, r) {
-    setLoadingShifts(true);
-    setError('');
-    try {
-      const data = await api.listSchedules({ agentId, dateFrom: r.dateFrom, dateTo: r.dateTo });
-      setShifts(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoadingShifts(false);
-    }
-  }
-
-  function handleRangeChange(field, value) {
-    const next = { ...range, [field]: value };
-    setRange(next);
-    if (selectedAgent && next.dateFrom && next.dateTo) {
-      loadShifts(selectedAgent.agent_id, next);
-    }
-  }
-
-  async function handleDelete(shift) {
-    if (!window.confirm(`Delete the ${shift.shiftType} shift on ${shift.shiftDate}?`)) return;
-    setError('');
-    try {
-      await api.deleteSchedule(shift.scheduleId);
-      loadShifts(selectedAgent.agent_id, range);
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  return (
-    <div>
-      {!selectedAgent ? (
-        <div style={{ maxWidth: 480 }}>
-          <label htmlFor="agentSearch">Search by Agent ID or Name</label>
-          <input
-            id="agentSearch"
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="e.g. 0000001 or Jane"
-            autoFocus
-          />
-          {searching && <p style={{ color: '#999', fontSize: 13 }}>Searching...</p>}
-          {results.length > 0 && (
-            <table style={{ marginTop: 12 }}>
-              <tbody>
-                {results.map((a) => (
-                  <tr key={a.agent_id} style={{ cursor: 'pointer' }} onClick={() => selectAgent(a)}>
-                    <td>{a.display_name}</td>
-                    <td>{a.agent_id}</td>
-                    <td>{a.group_name || <em style={{ color: '#999' }}>no group</em>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {!searching && query.trim() && results.length === 0 && (
-            <p style={{ color: '#999', fontSize: 13 }}>No agents match "{query.trim()}".</p>
-          )}
-        </div>
-      ) : (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-            <div>
-              <h3 style={{ margin: 0 }}>{selectedAgent.display_name} ({selectedAgent.agent_id})</h3>
-              <button
-                type="button"
-                className="btn-link"
-                style={{ padding: 0 }}
-                onClick={() => { setSelectedAgent(null); setShifts([]); }}
-              >
-                &laquo; Search a different agent
-              </button>
-            </div>
-            <button className="btn" onClick={() => setModalShift(null)}>+ Add Shift</button>
-          </div>
-
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap' }}>
-            <div>
-              <label htmlFor="agentDateFrom">From</label>
-              <input id="agentDateFrom" type="date" value={range.dateFrom} onChange={(e) => handleRangeChange('dateFrom', e.target.value)} />
-            </div>
-            <div>
-              <label htmlFor="agentDateTo">To</label>
-              <input id="agentDateTo" type="date" value={range.dateTo} onChange={(e) => handleRangeChange('dateTo', e.target.value)} />
-            </div>
-            {/* Widens to a 2-year window either side of today - a quick
-                escape hatch for exactly the situation that prompted this:
-                a shift loaded (e.g. directly via Workbench) for a date
-                outside the -30/+90 default not showing up because the
-                default window, not the search, was the reason it was
-                missing. */}
-            <button
-              type="button"
-              className="btn-link"
-              onClick={() => {
-                const today = getTodayEastern();
-                const wide = { dateFrom: addDaysToDateString(today, -730), dateTo: addDaysToDateString(today, 730) };
-                setRange(wide);
-                loadShifts(selectedAgent.agent_id, wide);
-              }}
-            >
-              Show everything (±2 years)
-            </button>
-          </div>
-
-          {error && <div className="error">{error}</div>}
-
-          {loadingShifts ? (
-            <p>Loading...</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Shift Date</th>
-                  <th>Shift Type</th>
-                  <th>Start</th>
-                  <th>End</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {shifts.length === 0 ? (
-                  <tr><td colSpan={5}>No shifts for this agent in the selected date range.</td></tr>
-                ) : (
-                  shifts.map((s) => (
-                    <tr key={s.scheduleId}>
-                      <td>{formatShiftDate(s.shiftDate)}</td>
-                      <td>{s.shiftType}</td>
-                      <td>{s.startTime}</td>
-                      <td>{s.endTime}{s.crossesMidnight && <span title="Ends the next day"> (+1)</span>}</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
-                        <button className="btn-link" onClick={() => setModalShift(s)}>Edit</button>
-                        {' | '}
-                        <button className="btn-link" onClick={() => handleDelete(s)}>Delete</button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          )}
-        </>
-      )}
-
-      {modalShift !== undefined && selectedAgent && (
-        <ScheduleFormModal
-          agentId={selectedAgent.agent_id}
-          agentName={selectedAgent.display_name}
-          existingShift={modalShift}
-          onClose={() => setModalShift(undefined)}
-          onSaved={() => loadShifts(selectedAgent.agent_id, range)}
-        />
-      )}
-    </div>
-  );
-}
-
-// Browse every agent's shifts in a date range, optionally narrowed by
-// an agent search term - this is the "show me the schedule table,
-// filterable by date" view, separate from the per-agent Edit tab.
-// Editing/deleting a row here works the same way (each row already
-// carries its own agent, so no agent picker is needed for that), but
-// adding a brand NEW shift stays on the Edit Agent Schedule tab, which
-// already has the agent search built in - avoiding a second agent
-// picker duplicated here.
-function BrowseSchedulesTab() {
+// One unified table: every agent's shifts in a date range, optionally
+// narrowed by an Agent ID/Name filter, with Edit/Delete directly on
+// each row (opens ScheduleFormModal) and a single "+ Add Shift"
+// button that lets you pick the agent as part of adding, rather than
+// requiring you to search for an agent BEFORE seeing any schedule
+// data (the old two-tab split this replaces).
+function AgentSchedulesTab() {
   const [range, setRange] = useState(defaultMonthRange());
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [modalShift, setModalShift] = useState(undefined); // undefined = closed, object = edit
+  const [modalShift, setModalShift] = useState(undefined); // undefined = closed, null = add (no agent yet), object = edit
 
   useEffect(() => {
     load();
@@ -426,25 +192,28 @@ function BrowseSchedulesTab() {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap' }}>
-        <div>
-          <label htmlFor="browseDateFrom">From</label>
-          <input id="browseDateFrom" type="date" value={range.dateFrom} onChange={(e) => setRange({ ...range, dateFrom: e.target.value })} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label htmlFor="scheduleDateFrom">From</label>
+            <input id="scheduleDateFrom" type="date" value={range.dateFrom} onChange={(e) => setRange({ ...range, dateFrom: e.target.value })} />
+          </div>
+          <div>
+            <label htmlFor="scheduleDateTo">To</label>
+            <input id="scheduleDateTo" type="date" value={range.dateTo} onChange={(e) => setRange({ ...range, dateTo: e.target.value })} />
+          </div>
+          <div style={{ minWidth: 220 }}>
+            <label htmlFor="scheduleAgentFilter">Filter by Agent ID or Name (optional)</label>
+            <input
+              id="scheduleAgentFilter"
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Leave blank for all agents"
+            />
+          </div>
         </div>
-        <div>
-          <label htmlFor="browseDateTo">To</label>
-          <input id="browseDateTo" type="date" value={range.dateTo} onChange={(e) => setRange({ ...range, dateTo: e.target.value })} />
-        </div>
-        <div style={{ flex: '1 1 200px' }}>
-          <label htmlFor="browseAgentFilter">Filter by Agent ID or Name (optional)</label>
-          <input
-            id="browseAgentFilter"
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Leave blank for all agents"
-          />
-        </div>
+        <button className="btn" onClick={() => setModalShift(null)}>+ Add Shift</button>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -492,8 +261,8 @@ function BrowseSchedulesTab() {
 
       {modalShift !== undefined && (
         <ScheduleFormModal
-          agentId={modalShift.agentId}
-          agentName={modalShift.displayName}
+          agentId={modalShift?.agentId}
+          agentName={modalShift?.displayName}
           existingShift={modalShift}
           onClose={() => setModalShift(undefined)}
           onSaved={load}

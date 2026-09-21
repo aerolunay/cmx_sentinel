@@ -74,6 +74,15 @@ th { background: #f0f2f5; font-weight: 600; }
 .login-subtitle { text-align: center; color: #1a2b4a; font-weight: 600; font-size: 13px; margin: 0 0 4px; letter-spacing: 0.5px; text-transform: uppercase; }
 .login-box .app-version { display: block; text-align: center; margin: 0 0 24px; }
 .login-box label { display: block; font-size: 13px; color: #444; margin-bottom: 4px; }
+
+/* Outside .login-box/.modal-box (where labels are block-level and
+   stack above their input), a label and its input sit on the same
+   line by default with zero gap between them - this covers those
+   plain-page cases (e.g. the Scheduler page's filter bars). Harmless
+   inside modal/login too: those labels are already display: block,
+   so a right-margin has nothing to its right on the same line to
+   affect. */
+label { margin-right: 6px; }
 .login-box input {
   width: 100%; padding: 10px; margin-bottom: 16px;
   border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box;
