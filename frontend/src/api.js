@@ -67,8 +67,14 @@ export const api = {
   getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
 
   searchScheduleAgents: (q) => request(`/api/schedules/search-agents?${new URLSearchParams({ q })}`),
-  listAgentSchedule: (agentId, params = {}) =>
-    request(`/api/schedules?${new URLSearchParams({ agentId, ...params })}`),
+  // params can include any of: agentId, dateFrom, dateTo, q - only
+  // defined ones are sent, so each caller (per-agent Edit tab vs. the
+  // all-agents Browse tab) can omit whichever don't apply and let the
+  // backend's own defaults kick in.
+  listSchedules: (params = {}) => {
+    const defined = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+    return request(`/api/schedules?${new URLSearchParams(defined)}`);
+  },
   createSchedule: (schedule) => request('/api/schedules', { method: 'POST', body: JSON.stringify(schedule) }),
   updateSchedule: (scheduleId, schedule) =>
     request(`/api/schedules/${scheduleId}`, { method: 'PUT', body: JSON.stringify(schedule) }),
