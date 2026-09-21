@@ -4,12 +4,12 @@ import { api } from '../api.js';
 // Same aux codes the desktop app tracks (see AgentState.cs) - shown as
 // columns in a fixed order regardless of which ones a given row
 // actually has hours in, so the table doesn't reflow oddly row to row.
-const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Meeting', 'Training', 'BioBreak', 'Idle'];
+const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle'];
 
 // Same codes the backend treats as "productive" - duplicated here
 // since monthly aggregation happens client-side (see aggregateMonthly
 // below), not a separate backend query.
-const PRODUCTIVE_AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Meeting', 'Training'];
+const PRODUCTIVE_AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Coaching', 'Meeting', 'Training'];
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -35,7 +35,16 @@ function formatMonthLabel(monthStr) {
 // averaged from the daily percentages - averaging percentages across
 // days of different lengths would be mathematically wrong (a 100%
 // efficient 2-hour day and a 50% efficient 10-hour day do NOT average
-// to 75% of the combined 12 hours).
+// to 75% of the combined 12 hours). Same reasoning applies to
+// adherencePct below.
+//
+// Each daily row's auxHours/totalHours is ALREADY schedule-scoped when
+// that day has a schedule (hasSchedule: true) and falls back to the
+// legacy unscoped totals otherwise - see reportRoutes.js. A month can
+// freely mix both kinds of days (e.g. schedule sync only recently
+// started); scheduledHours/adherencePct are accumulated ONLY from days
+// that actually have a schedule, so a day with no schedule simply
+// doesn't affect the adherence figure either way.
 function aggregateMonthly(dailyRows) {
   const grouped = new Map();
 
@@ -50,11 +59,19 @@ function aggregateMonthly(dailyRows) {
         groupId: r.groupId,
         groupName: r.groupName,
         auxHours: {},
+        scheduledHours: 0,
+        scheduledLoggedHours: 0,
+        hasAnySchedule: false,
       });
     }
     const entry = grouped.get(key);
     for (const [code, hours] of Object.entries(r.auxHours)) {
       entry.auxHours[code] = (entry.auxHours[code] || 0) + hours;
+    }
+    if (r.hasSchedule) {
+      entry.hasAnySchedule = true;
+      entry.scheduledHours += r.scheduledHours || 0;
+      entry.scheduledLoggedHours += r.totalHours;
     }
   }
 
@@ -66,6 +83,9 @@ function aggregateMonthly(dailyRows) {
         ...entry,
         totalHours,
         efficiencyPct: totalHours > 0 ? (productiveHours / totalHours) * 100 : 0,
+        adherencePct: entry.hasAnySchedule && entry.scheduledHours > 0
+          ? (entry.scheduledLoggedHours / entry.scheduledHours) * 100
+          : null,
       };
     })
     .sort((a, b) => b.date.localeCompare(a.date) || a.displayName.localeCompare(b.displayName));
@@ -93,8 +113,20 @@ function getEfficiencyColor(pct) {
   return '#b91c1c'; // red
 }
 
+// Adherence is a different metric than efficiency (time actually
+// logged during the shift, vs. time spent productively while logged
+// in) so it gets its own thresholds - deliberately stricter, since
+// "showed up for your shift" is a lower bar that should read as
+// concerning sooner than efficiency does.
+function getAdherenceColor(pct) {
+  if (pct >= 95) return '#1e3a8a'; // dark blue
+  if (pct >= 90) return '#166534'; // dark green
+  if (pct >= 80) return '#c2660a'; // orange
+  return '#b91c1c'; // red
+}
+
 function toCsv(rows) {
-  const headers = ['Date', 'Agent', 'Agent ID', 'Group', ...AUX_CODES, 'Total Hours', 'Efficiency %'];
+  const headers = ['Date', 'Agent', 'Agent ID', 'Group', ...AUX_CODES, 'Total Hours', 'Efficiency %', 'Scheduled Hours', 'Adherence %'];
   const lines = [headers.join(',')];
 
   for (const r of rows) {
@@ -106,6 +138,8 @@ function toCsv(rows) {
       ...AUX_CODES.map((code) => (r.auxHours[code] || 0).toFixed(2)),
       r.totalHours.toFixed(2),
       r.efficiencyPct.toFixed(1),
+      r.scheduledHours == null ? '' : r.scheduledHours.toFixed(2),
+      r.adherencePct == null ? '' : r.adherencePct.toFixed(1),
     ];
     lines.push(line.join(','));
   }
@@ -240,6 +274,8 @@ export default function ReportsPage() {
                 {AUX_CODES.map((code) => <th key={code}>{code}</th>)}
                 <th>Total Hours</th>
                 <th>Efficiency %</th>
+                <th>Scheduled Hours</th>
+                <th>Adherence %</th>
               </tr>
             </thead>
             <tbody>
@@ -253,6 +289,10 @@ export default function ReportsPage() {
                   ))}
                   <td>{formatHours(r.totalHours)}</td>
                   <td style={{ fontWeight: 600, color: getEfficiencyColor(r.efficiencyPct) }}>{r.efficiencyPct.toFixed(1)}%</td>
+                  <td>{r.scheduledHours == null ? <em style={{ color: '#999' }}>no schedule</em> : formatHours(r.scheduledHours)}</td>
+                  <td style={r.adherencePct == null ? undefined : { fontWeight: 600, color: getAdherenceColor(r.adherencePct) }}>
+                    {r.adherencePct == null ? <em style={{ color: '#999' }}>N/A</em> : `${r.adherencePct.toFixed(1)}%`}
+                  </td>
                 </tr>
               ))}
             </tbody>

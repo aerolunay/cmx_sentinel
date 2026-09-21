@@ -6,11 +6,11 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { api } from '../api.js';
 import Setup2FAModal from '../modals/Setup2FAModal.jsx';
 
-const PRODUCTIVE_AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Meeting', 'Training'];
-const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Meeting', 'Training', 'BioBreak', 'Idle'];
+const PRODUCTIVE_AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Coaching', 'Meeting', 'Training'];
+const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle'];
 const AUX_COLORS = {
   Production: '#1e3a8a', Admin: '#2563eb', Adhoc: '#3b82f6',
-  Lunch: '#c2660a', Break: '#d97706', Meeting: '#166534', Training: '#16a34a',
+  Lunch: '#c2660a', Break: '#d97706', Coaching: '#0d9488', Meeting: '#166534', Training: '#16a34a',
   BioBreak: '#7c3aed', Idle: '#6b7280',
 };
 
@@ -19,6 +19,14 @@ const AUX_COLORS = {
 function getEfficiencyColor(pct) {
   if (pct >= 88) return '#1e3a8a'; // dark blue
   if (pct >= 85) return '#166534'; // dark green
+  if (pct >= 80) return '#c2660a'; // orange
+  return '#b91c1c'; // red
+}
+
+// Same thresholds as ReportsPage.jsx's getAdherenceColor.
+function getAdherenceColor(pct) {
+  if (pct >= 95) return '#1e3a8a'; // dark blue
+  if (pct >= 90) return '#166534'; // dark green
   if (pct >= 80) return '#c2660a'; // orange
   return '#b91c1c'; // red
 }
@@ -119,6 +127,23 @@ export default function DashboardPage() {
     return totalHours > 0 ? (productiveHours / totalHours) * 100 : 0;
   }, [filteredRows]);
 
+  // Same "sum first, then divide" approach, but only over days that
+  // actually have a schedule loaded (hasSchedule: true) - a day
+  // without one simply doesn't contribute to either side of the
+  // ratio, rather than being treated as 0% adherence.
+  const monthToDateAdherence = useMemo(() => {
+    let scheduledHours = 0;
+    let scheduledLoggedHours = 0;
+    let hasAnySchedule = false;
+    for (const r of filteredRows) {
+      if (!r.hasSchedule) continue;
+      hasAnySchedule = true;
+      scheduledHours += r.scheduledHours || 0;
+      scheduledLoggedHours += r.totalHours;
+    }
+    return hasAnySchedule && scheduledHours > 0 ? (scheduledLoggedHours / scheduledHours) * 100 : null;
+  }, [filteredRows]);
+
   // Each aux code's SHARE of total logged time, not raw hours - easier
   // to compare across agents/groups of different total hours this way.
   const auxBreakdown = useMemo(() => {
@@ -179,10 +204,23 @@ export default function DashboardPage() {
         <p>No data for this month{groupFilter ? ' / group' : ''} yet.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div className="dashboard-card" style={{ textAlign: 'center' }}>
-            <h3 style={{ marginBottom: 4 }}>Month to Date Efficiency</h3>
-            <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(monthToDateEfficiency) }}>
-              {monthToDateEfficiency.toFixed(1)}%
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
+              <h3 style={{ marginBottom: 4 }}>Month to Date Efficiency</h3>
+              <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(monthToDateEfficiency) }}>
+                {monthToDateEfficiency.toFixed(1)}%
+              </div>
+            </div>
+
+            <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
+              <h3 style={{ marginBottom: 4 }}>Month to Date Schedule Adherence</h3>
+              {monthToDateAdherence == null ? (
+                <div style={{ fontSize: 16, color: '#999', padding: '14px 0' }}>No schedule data for this month yet.</div>
+              ) : (
+                <div style={{ fontSize: 48, fontWeight: 700, color: getAdherenceColor(monthToDateAdherence) }}>
+                  {monthToDateAdherence.toFixed(1)}%
+                </div>
+              )}
             </div>
           </div>
 
