@@ -28,6 +28,7 @@ export default function ScheduleFormModal({ agentId, agentName, existingShift, o
 
   const [shiftDate, setShiftDate] = useState(existingShift?.shiftDate || '');
   const [shiftType, setShiftType] = useState(existingShift?.shiftType || 'Regular');
+  const [showShiftTypeOptions, setShowShiftTypeOptions] = useState(false);
   const [startTime, setStartTime] = useState(existingShift?.startTime || '');
   const [endTime, setEndTime] = useState(existingShift?.endTime || '');
   const [error, setError] = useState('');
@@ -141,17 +142,48 @@ export default function ScheduleFormModal({ agentId, agentName, existingShift, o
               />
 
               <label htmlFor="shiftType">Shift Type</label>
-              <input
-                id="shiftType"
-                type="text"
-                list="shift-type-suggestions"
-                value={shiftType}
-                onChange={(e) => setShiftType(e.target.value)}
-                maxLength={32}
-              />
-              <datalist id="shift-type-suggestions">
-                {SHIFT_TYPE_SUGGESTIONS.map((t) => <option key={t} value={t} />)}
-              </datalist>
+              {/* A plain text input, so the field still accepts any
+                  ad hoc value (shift_type is free text, not a fixed
+                  enum - see the comment on SHIFT_TYPE_SUGGESTIONS
+                  above and shift_type's own column comment in
+                  sql/002_add_agent_schedules.sql). Deliberately NOT
+                  a native <input list> + <datalist> combo: browsers
+                  filter datalist suggestions by whatever text is
+                  ALREADY in the box, so on an edit (pre-filled with
+                  e.g. "Regular") every OTHER suggestion gets silently
+                  filtered out and only the current value shows -
+                  looking like there's only ever one option. This
+                  custom dropdown always shows the full suggestion
+                  list on focus/click, click-to-fill like the agent
+                  picker above, regardless of what's currently typed. */}
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="shiftType"
+                  type="text"
+                  value={shiftType}
+                  onChange={(e) => setShiftType(e.target.value)}
+                  onFocus={() => setShowShiftTypeOptions(true)}
+                  onBlur={() => setTimeout(() => setShowShiftTypeOptions(false), 150)}
+                  maxLength={32}
+                  autoComplete="off"
+                />
+                {showShiftTypeOptions && (
+                  <table style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1, marginTop: 2 }}>
+                    <tbody>
+                      {SHIFT_TYPE_SUGGESTIONS.map((t) => (
+                        <tr
+                          key={t}
+                          style={{ cursor: 'pointer' }}
+                          onMouseDown={(e) => e.preventDefault()} // keeps the input's onBlur from firing before the click registers
+                          onClick={() => { setShiftType(t); setShowShiftTypeOptions(false); }}
+                        >
+                          <td>{t}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
 
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
