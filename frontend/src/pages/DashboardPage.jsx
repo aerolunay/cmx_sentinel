@@ -52,6 +52,7 @@ export default function DashboardPage() {
   const [show2FAModal, setShow2FAModal] = useState(false);
   const [month, setMonth] = useState(getCurrentMonthEastern());
   const [groupFilter, setGroupFilter] = useState('');
+  const [agentFilter, setAgentFilter] = useState('');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -87,10 +88,31 @@ export default function DashboardPage() {
     return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [rows]);
 
-  const filteredRows = useMemo(() => {
+  // Scoped to the current GROUP filter (not the agent filter itself) so
+  // switching groups narrows the agent dropdown to agents who actually
+  // belong to it, same cascading behavior as picking a country narrowing
+  // a city dropdown - built from `rows`, not `filteredRows`, to avoid a
+  // circular dependency on agentFilter.
+  const groupScopedRows = useMemo(() => {
     if (!groupFilter) return rows;
     return rows.filter((r) => String(r.groupId) === groupFilter);
   }, [rows, groupFilter]);
+
+  const agentOptions = useMemo(() => {
+    const seen = new Map();
+    for (const r of groupScopedRows) {
+      if (r.agentId && !seen.has(r.agentId)) seen.set(r.agentId, r.displayName);
+    }
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [groupScopedRows]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      if (groupFilter && String(r.groupId) !== groupFilter) return false;
+      if (agentFilter && String(r.agentId) !== agentFilter) return false;
+      return true;
+    });
+  }, [rows, groupFilter, agentFilter]);
 
   // One point per day - sums ALL agents together for that day (overall,
   // or within the selected group), then computes efficiency from those
@@ -174,11 +196,21 @@ export default function DashboardPage() {
           />
           <select
             value={groupFilter}
-            onChange={(e) => setGroupFilter(e.target.value)}
+            onChange={(e) => { setGroupFilter(e.target.value); setAgentFilter(''); }}
             style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
           >
             <option value="">All Groups</option>
             {groupOptions.map(([id, name]) => (
+              <option key={id} value={id}>{name}</option>
+            ))}
+          </select>
+          <select
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
+          >
+            <option value="">All Agents</option>
+            {agentOptions.map(([id, name]) => (
               <option key={id} value={id}>{name}</option>
             ))}
           </select>
@@ -201,7 +233,7 @@ export default function DashboardPage() {
       {loading ? (
         <p>Loading...</p>
       ) : filteredRows.length === 0 ? (
-        <p>No data for this month{groupFilter ? ' / group' : ''} yet.</p>
+        <p>No data for this month{groupFilter || agentFilter ? ' / filter' : ''} yet.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
@@ -227,9 +259,9 @@ export default function DashboardPage() {
           <div className="dashboard-card">
             <h3>Efficiency Trend</h3>
             <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={efficiencyTrend}>
+              <LineChart data={efficiencyTrend} margin={{ top: 5, right: 20, left: 0, bottom: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                <XAxis dataKey="day" label={{ value: 'Day of Month', position: 'insideBottom', offset: -5 }} fontSize={12} />
+                <XAxis dataKey="day" label={{ value: 'Day of Month', position: 'insideBottom', offset: -14 }} fontSize={12} />
                 <YAxis domain={[0, 100]} unit="%" fontSize={12} />
                 <Tooltip formatter={(value) => `${value}%`} labelFormatter={(day) => `Day ${day}`} />
                 <Line type="monotone" dataKey="efficiency" stroke="#1e3a8a" strokeWidth={2} dot={{ r: 3 }} name="Efficiency %" />
