@@ -9,7 +9,15 @@
 admin.yourdomain.com {
     # API requests go to the Express backend...
     handle /api/* {
-        reverse_proxy 127.0.0.1:5051
+        # flush_interval -1 disables Caddy's response buffering -
+        # required for /api/desktop-sync/session/subscribe (Server-Sent
+        # Events for the single-active-session force-logout push).
+        # Without this, Caddy can hold the event in its buffer instead
+        # of forwarding it immediately, silently turning "near instant"
+        # into "whenever the buffer happens to flush."
+        reverse_proxy 127.0.0.1:5051 {
+            flush_interval -1
+        }
     }
 
     # ...everything else is the React build (client-side routing means

@@ -6,6 +6,7 @@ const db = require("../config/db");
 const { requireInternalApiKey } = require("../middleware/requireInternalApiKey");
 const { toEasternSqlString, getTodayUtcRangeEastern } = require("../services/easternTime");
 const { DateTime } = require("luxon");
+const sessionOwnership = require("../services/sessionOwnership");
 
 const router = express.Router();
 
@@ -225,20 +226,38 @@ router.get("/restrictions", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------
-// Stale session closing - replaces StaleSessionCloser.cs.
+// Session ownership - single-active-session enforcement. Replaces
+// StaleSessionCloser.cs / the old /stale-sessions/close endpoint,
+// which only ever closed the DB bookkeeping row and never told the
+// other machine's live service to actually stop. This does three
+// things atomically, in order, on every LOGIN attempt (called from
+// IpcServer BEFORE AgentState.Login runs locally - see
+// SessionOwnershipClient.cs on the desktop side):
+//   1. close out the previous machine's open aux_events row (same SQL
+//      as before, logout_trigger='switched_machine')
+//   2. push a force_logout event down that machine's live SSE
+//      connection, if it has one open right now (near-instant - no
+//      polling)
+//   3. record this machine as the new owner, so a THIRD machine
+//      logging in later evicts the right one
+// A machine that's offline/asleep/never subscribed just doesn't get a
+// push - there's nothing live to notify, and that's fine: its
+// aux_events row is still correctly closed in the DB either way. See
+// sessionOwnership.js for why this deliberately doesn't wait for an
+// acknowledgement.
 // ---------------------------------------------------------------------
 
-router.post("/stale-sessions/close", async (req, res) => {
-  const { agentId, thisMachine } = req.body || {};
-  if (!agentId || !thisMachine) {
-    return res.status(400).json({ error: "agentId and thisMachine are required." });
+router.post("/session/claim", async (req, res) => {
+  const { agentId, machineName } = req.body || {};
+  if (!agentId || !machineName) {
+    return res.status(400).json({ error: "agentId and machineName are required." });
   }
 
   try {
     const [staleRows] = await db.query(
       `SELECT event_id FROM aux_events
        WHERE agent_id = ? AND ended_at_utc IS NULL AND (machine_name IS NULL OR machine_name <> ?)`,
-      [agentId, thisMachine]
+      [agentId, machineName]
     );
 
     const now = new Date();
@@ -253,11 +272,87 @@ router.post("/stale-sessions/close", async (req, res) => {
       );
     }
 
-    res.json({ closedCount: staleRows.length });
+    // Ownership claim + push happens AFTER the DB close succeeds, so a
+    // pushed force-logout on the other machine is never ahead of the
+    // report data actually reflecting it.
+    const { previousMachineName, pushed } = sessionOwnership.claim(agentId, machineName);
+
+    if (previousMachineName) {
+      console.warn(
+        `Agent ${agentId} claimed by ${machineName}, evicting ${previousMachineName} ` +
+        `(closed ${staleRows.length} stale event(s), live push ${pushed ? "sent" : "not possible - not connected"}).`
+      );
+    }
+
+    res.json({ closedCount: staleRows.length, previousMachineName, pushed });
   } catch (err) {
-    console.error("Error closing stale sessions:", err);
-    res.status(500).json({ closedCount: 0 });
+    console.error("Error claiming session:", err);
+    res.status(500).json({ closedCount: 0, previousMachineName: null, pushed: false });
   }
+});
+
+// Long-lived Server-Sent Events stream - one per logged-in machine.
+// The desktop service opens this immediately after a successful LOGIN
+// (having already called /session/claim first) and keeps it open for
+// the life of that login. A force_logout event means "a different
+// machine just claimed this agent's session - log out now."
+router.get("/session/subscribe", async (req, res) => {
+  const { agentId, machineName } = req.query;
+  if (!agentId || !machineName) {
+    return res.status(400).json({ error: "agentId and machineName are required." });
+  }
+
+  const attached = sessionOwnership.attachConnection(agentId, machineName, res);
+  if (!attached) {
+    // This machine claimed ownership, then got evicted by yet another
+    // machine before it managed to open this stream - it should treat
+    // itself as already logged out rather than sit here believing
+    // it's still the active session.
+    return res.status(409).json({ error: "This machine is no longer the active session for this agent." });
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    // Caddy (and any other intermediary) must not buffer this - see
+    // Caddyfile.snippet's flush_interval note.
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+  res.write(": connected\n\n");
+
+  // Keeps the connection alive through proxies/load balancers that
+  // drop idle connections, and lets a dead TCP connection surface via
+  // a write error instead of hanging around as a zombie in the
+  // registry until the next claim() tries to use it.
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(": ping\n\n");
+    } catch {
+      clearInterval(keepAlive);
+    }
+  }, 20000);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    sessionOwnership.detachConnection(agentId, machineName, res);
+  });
+});
+
+// Called on a normal (agent-initiated) LOGOUT so this machine's
+// ownership entry doesn't linger after it's genuinely no longer
+// logged in - without this, a later force_logout push race is
+// harmless (the SSE connection is already closed) but the registry
+// would otherwise hold a stale "owner" that's actually logged out
+// until some other machine happens to claim() and overwrite it.
+router.post("/session/release", async (req, res) => {
+  const { agentId, machineName } = req.body || {};
+  if (!agentId || !machineName) {
+    return res.status(400).json({ error: "agentId and machineName are required." });
+  }
+  sessionOwnership.release(agentId, machineName);
+  res.json({ released: true });
 });
 
 // ---------------------------------------------------------------------
