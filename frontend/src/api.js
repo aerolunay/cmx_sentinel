@@ -66,6 +66,33 @@ export const api = {
 
   getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
 
+  searchScheduleAgents: (q) => request(`/api/schedules/search-agents?${new URLSearchParams({ q })}`),
+  listAgentSchedule: (agentId, params = {}) =>
+    request(`/api/schedules?${new URLSearchParams({ agentId, ...params })}`),
+  createSchedule: (schedule) => request('/api/schedules', { method: 'POST', body: JSON.stringify(schedule) }),
+  updateSchedule: (scheduleId, schedule) =>
+    request(`/api/schedules/${scheduleId}`, { method: 'PUT', body: JSON.stringify(schedule) }),
+  deleteSchedule: (scheduleId) => request(`/api/schedules/${scheduleId}`, { method: 'DELETE' }),
+  // Doesn't go through the shared request() helper above - this is a
+  // multipart file upload, not JSON, so it needs its own fetch call
+  // without the 'Content-Type: application/json' header (the browser
+  // sets the correct multipart boundary header itself when the body
+  // is a FormData).
+  async bulkUploadSchedules(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch('/api/schedules/bulk-upload', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Request failed (${response.status})`);
+    }
+    return data;
+  },
+
   listAuditLog: () => request('/api/audit-log'),
 
   listViolations: () => request('/api/violations'),

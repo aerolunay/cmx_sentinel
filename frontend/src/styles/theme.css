@@ -103,6 +103,14 @@ th { background: #f0f2f5; font-weight: 600; }
 .btn-link:hover { color: #253a63; }
 .btn-link:disabled { color: #999; cursor: default; text-decoration: none; }
 
+.btn-tab {
+  background: none; border: none; border-bottom: 3px solid transparent;
+  padding: 8px 16px; font-size: 14px; color: #666; cursor: pointer;
+  margin-bottom: -1px;
+}
+.btn-tab:hover { color: #1a2b4a; }
+.btn-tab.active { color: #1a2b4a; border-bottom-color: #1a2b4a; font-weight: 600; }
+
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.4);
   display: flex; align-items: center; justify-content: center;

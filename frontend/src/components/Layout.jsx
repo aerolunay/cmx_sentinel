@@ -52,6 +52,9 @@ export default function Layout() {
               <NavLink to="/agents" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Agents
               </NavLink>
+              <NavLink to="/scheduler" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Shift Scheduler
+              </NavLink>
               <NavLink to="/violations" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Violations
               </NavLink>
