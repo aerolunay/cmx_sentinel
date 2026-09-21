@@ -13,7 +13,7 @@ import { api } from '../api.js';
 //   table's own "+ Add Shift" button, which isn't scoped to any one
 //   agent): shows an inline agent search/picker first; the rest of
 //   the form only appears once an agent is chosen.
-const SHIFT_TYPE_SUGGESTIONS = ['Regular', 'OT', 'RestDayOT'];
+const SHIFT_TYPE_SUGGESTIONS = ['Regular', 'Pre/Post Shift OT', 'Rest Day OT'];
 
 export default function ScheduleFormModal({ agentId, agentName, existingShift, onClose, onSaved }) {
   const isEditing = Boolean(existingShift);
