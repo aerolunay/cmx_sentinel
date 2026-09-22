@@ -18,6 +18,7 @@ const scheduleRoutes = require("./routes/scheduleRoutes");
 const auditRoutes = require("./routes/auditRoutes");
 const violationRoutes = require("./routes/violationRoutes");
 const desktopSyncRoutes = require("./routes/desktopSyncRoutes");
+const archiveRoutes = require("./routes/archiveRoutes");
 
 const app = express();
 
@@ -91,6 +92,11 @@ app.use("/api/schedules", scheduleRoutes);
 app.use("/api/audit-log", auditRoutes);
 app.use("/api/violations", violationRoutes);
 app.use("/api/desktop-sync", desktopSyncRoutes);
+// Mounted at /archive, not /api/archive - shared-secret auth (not
+// session-based), called by scripts/archive_recordings.py running
+// somewhere outside this server entirely. See archiveRoutes.js's own
+// header comment.
+app.use("/archive", archiveRoutes);
 
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);

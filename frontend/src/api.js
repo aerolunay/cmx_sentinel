@@ -64,6 +64,9 @@ export const api = {
 
   listRecordings: () => request('/api/recordings'),
   getRecordingUrl: (key) => request(`/api/recordings/url?key=${encodeURIComponent(key)}`),
+  // super_admin only (enforced server-side too) - returns a presigned
+  // URL that prompts an actual file save rather than playing inline.
+  getRecordingDownloadUrl: (key) => request(`/api/recordings/download?key=${encodeURIComponent(key)}`),
 
   listGroups: () => request('/api/groups'),
   createGroup: (groupName) => request('/api/groups', { method: 'POST', body: JSON.stringify({ groupName }) }),

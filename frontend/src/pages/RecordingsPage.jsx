@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import RecordingPlaybackModal from '../modals/RecordingPlaybackModal.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 
 function formatSize(bytes) {
+  if (bytes == null) return '—';
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
@@ -30,6 +32,8 @@ function formatEastern(isoString) {
 }
 
 export default function RecordingsPage() {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const [recordings, setRecordings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -38,6 +42,7 @@ export default function RecordingsPage() {
   const [dateFrom, setDateFrom] = useState(getTodayEastern());
   const [dateTo, setDateTo] = useState(getTodayEastern());
   const [playingRecording, setPlayingRecording] = useState(null);
+  const [downloadingKey, setDownloadingKey] = useState(null);
 
   useEffect(() => {
     api
@@ -80,6 +85,24 @@ export default function RecordingsPage() {
   function clearDates() {
     setDateFrom('');
     setDateTo('');
+  }
+
+  async function handleDownload(recording) {
+    setError('');
+    setDownloadingKey(recording.key);
+    try {
+      const { url } = await api.getRecordingDownloadUrl(recording.key);
+      // Presigned URL already carries ResponseContentDisposition:
+      // attachment (set server-side), so navigating to it triggers a
+      // real file save rather than playing inline - no need for an
+      // <a download> attribute, which wouldn't work cross-origin
+      // against S3 anyway.
+      window.location.href = url;
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDownloadingKey(null);
+    }
   }
 
   return (
@@ -152,7 +175,32 @@ export default function RecordingsPage() {
                   <td>{formatEastern(r.recordedAt)}</td>
                   <td>{formatSize(r.sizeBytes)}</td>
                   <td>
-                    <button className="btn-link" onClick={() => setPlayingRecording(r)}>Play</button>
+                    {r.isArchived ? (
+                      // Per explicit request - once archived, a
+                      // recording is genuinely gone from this app's
+                      // reach for every role, including super_admin.
+                      // No Play/Download control at all, just a
+                      // record of what happened to it.
+                      <span style={{ fontSize: 13, color: '#888' }}>
+                        Archived to local storage on {formatEastern(r.archivedAt)}
+                      </span>
+                    ) : (
+                      <>
+                        <button className="btn-link" onClick={() => setPlayingRecording(r)}>Play</button>
+                        {isSuperAdmin && (
+                          <>
+                            {' | '}
+                            <button
+                              className="btn-link"
+                              onClick={() => handleDownload(r)}
+                              disabled={downloadingKey === r.key}
+                            >
+                              {downloadingKey === r.key ? 'Preparing...' : 'Download'}
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

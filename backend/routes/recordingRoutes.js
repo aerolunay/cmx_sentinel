@@ -7,6 +7,7 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { s3, BUCKET_NAME } = require("../config/s3");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
+const { requireRole } = require("../middleware/requireRole");
 const { getScopedGroupIds } = require("../services/groupScope");
 
 const router = express.Router();
@@ -71,14 +72,44 @@ router.get("/", async (req, res) => {
     });
     const result = await s3.send(command);
 
-    const recordings = (result.Contents || [])
+    const liveRecordings = (result.Contents || [])
       .map((obj) => {
         const parsed = parseRecordingKey(obj.Key);
         if (!parsed) return null;
-        return { ...parsed, sizeBytes: obj.Size };
+        return { ...parsed, sizeBytes: obj.Size, isArchived: false, archivedAt: null };
       })
-      .filter(Boolean)
-      .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt));
+      .filter(Boolean);
+
+    // Recordings the local archival script has already moved off S3 -
+    // still shown as a row (with isArchived: true instead of a working
+    // sizeBytes/key) rather than just disappearing, so there's a
+    // record of what happened to them. See
+    // 003_create_archived_recordings.sql and archiveRoutes.js.
+    const [archivedRows] = await db.query(
+      "SELECT recording_key, agent_id, sanitized_name, recorded_at_utc, archived_at FROM archived_recordings"
+    );
+    const archivedRecordings = archivedRows.map((row) => {
+      // Same "trust mysql2's Date object as the correct UTC instant"
+      // convention already used for started_at_utc/ended_at_utc in
+      // desktopSyncRoutes.js - this process's own OS timezone is UTC,
+      // which is what makes that trust valid.
+      const recordedAtIso = new Date(row.recorded_at_utc).toISOString();
+      return {
+        key: row.recording_key,
+        fileName: row.recording_key.split("/").pop(),
+        sanitizedName: row.sanitized_name,
+        agentId: row.agent_id,
+        recordedAt: recordedAtIso,
+        recordedDateEastern: DateTime.fromISO(recordedAtIso).setZone("America/New_York").toFormat("yyyy-MM-dd"),
+        sizeBytes: null,
+        isArchived: true,
+        archivedAt: row.archived_at,
+      };
+    });
+
+    const recordings = [...liveRecordings, ...archivedRecordings].sort(
+      (a, b) => new Date(b.recordedAt) - new Date(a.recordedAt)
+    );
 
     // Recordings come from S3 filenames, not a DB query - so scoping
     // by group means cross-referencing the parsed agentId against the
@@ -102,27 +133,44 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Shared by /url and /download below - a key that's been archived no
+// longer exists in S3 at all (archiveRoutes.js deletes it once local
+// copying succeeds), so both routes need to fail with a clear message
+// instead of attempting a presigned URL for an object that's gone and
+// surfacing a confusing raw S3 error instead.
+async function checkNotArchived(key) {
+  const [rows] = await db.query("SELECT 1 FROM archived_recordings WHERE recording_key = ?", [key]);
+  return rows.length === 0;
+}
+
+// Shared group-scope check for a single recording key, used by both
+// /url and /download - the list endpoint filters what a scoped user
+// SEES, but these are independently reachable with any key (e.g. from
+// browser history), so scope must be enforced here too.
+async function isKeyInScope(req, parsed) {
+  const scopedGroupIds = await getScopedGroupIds(req);
+  if (scopedGroupIds === null) return true;
+  const [agentRows] = await db.query("SELECT group_id FROM agents WHERE agent_id = ?", [parsed.agentId]);
+  return scopedGroupIds.includes(agentRows[0]?.group_id);
+}
+
 router.get("/url", async (req, res) => {
   const { key } = req.query;
   if (!key || !key.startsWith("recordings/")) {
     return res.status(400).json({ error: "Invalid recording key." });
   }
 
-  // The list endpoint filters what a scoped user SEES, but this
-  // endpoint is independently reachable with any key (e.g. from
-  // browser history) - must enforce scope here too, not just trust
-  // that the frontend only ever asks for keys it already showed.
-  const scopedGroupIds = await getScopedGroupIds(req);
-  if (scopedGroupIds !== null) {
-    const parsed = parseRecordingKey(key);
-    if (!parsed) {
-      return res.status(400).json({ error: "Invalid recording key." });
-    }
-    const [agentRows] = await db.query("SELECT group_id FROM agents WHERE agent_id = ?", [parsed.agentId]);
-    const agentGroupId = agentRows[0]?.group_id;
-    if (!scopedGroupIds.includes(agentGroupId)) {
-      return res.status(403).json({ error: "You do not have access to this recording." });
-    }
+  const parsed = parseRecordingKey(key);
+  if (!parsed) {
+    return res.status(400).json({ error: "Invalid recording key." });
+  }
+
+  if (!(await isKeyInScope(req, parsed))) {
+    return res.status(403).json({ error: "You do not have access to this recording." });
+  }
+
+  if (!(await checkNotArchived(key))) {
+    return res.status(410).json({ error: "This recording has been archived to local storage and is no longer available here." });
   }
 
   try {
@@ -137,4 +185,47 @@ router.get("/url", async (req, res) => {
   }
 });
 
+// Per explicit request - download (as opposed to play/stream) is
+// super_admin only. Same scope + archived checks as /url above, plus
+// ResponseContentDisposition:"attachment" so the browser prompts an
+// actual file save instead of playing it inline - same mechanism
+// CMX Suite's own getDownloadUrl uses.
+router.get("/download", requireRole("super_admin"), async (req, res) => {
+  const { key } = req.query;
+  if (!key || !key.startsWith("recordings/")) {
+    return res.status(400).json({ error: "Invalid recording key." });
+  }
+
+  const parsed = parseRecordingKey(key);
+  if (!parsed) {
+    return res.status(400).json({ error: "Invalid recording key." });
+  }
+
+  if (!(await isKeyInScope(req, parsed))) {
+    return res.status(403).json({ error: "You do not have access to this recording." });
+  }
+
+  if (!(await checkNotArchived(key))) {
+    return res.status(410).json({ error: "This recording has been archived to local storage and is no longer available here." });
+  }
+
+  try {
+    const fileName = key.split("/").pop();
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      ResponseContentDisposition: `attachment; filename="${fileName}"`,
+    });
+    const url = await getSignedUrl(s3, command, { expiresIn: 15 * 60 });
+    res.json({ url });
+  } catch (err) {
+    console.error("Error generating download URL:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
 module.exports = router;
+// Reused by archiveRoutes.js so both files derive agentId/recordedAt
+// from a recording key the exact same way - see that file's header
+// comment.
+module.exports.parseRecordingKey = parseRecordingKey;
