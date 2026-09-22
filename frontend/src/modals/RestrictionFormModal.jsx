@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../api.js';
 
 // Mirrors the backend's own isDangerouslyBroadPattern check
@@ -21,17 +21,22 @@ export default function RestrictionFormModal({ groupId, existingRestriction, onC
   const [isActive, setIsActive] = useState(existingRestriction?.is_active ?? true);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const domainInputRef = useRef(null);
 
   const trimmedDomain = domain.trim();
   const domainTooBroad = trimmedDomain !== '' && isDangerouslyBroadPattern(trimmedDomain);
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  // Shared by both "Save" and "Save & Add Another" - returns the saved
+  // record on success, or null if validation failed (error already
+  // set) or the request itself failed (error already set) - either
+  // way the caller just checks truthiness rather than duplicating the
+  // validation/error-handling logic twice.
+  async function saveRestriction() {
     setError('');
 
     if (domainTooBroad) {
       setError('This pattern matches every possible domain - narrow it down (e.g. "*porn*.*", not just "*").');
-      return;
+      return null;
     }
 
     setSubmitting(true);
@@ -41,12 +46,36 @@ export default function RestrictionFormModal({ groupId, existingRestriction, onC
       const saved = isEditing
         ? await api.updateRestriction(groupId, existingRestriction.restriction_id, payload)
         : await api.createRestriction(groupId, payload);
-      onSaved(saved);
-      onClose();
+      return saved;
     } catch (err) {
       setError(err.message);
+      return null;
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const saved = await saveRestriction();
+    if (saved) {
+      onSaved(saved);
+      onClose();
+    }
+  }
+
+  // Create-mode only (see the button itself, below) - saves, then
+  // clears the form and keeps the modal open with focus back on
+  // Domain, instead of closing, so adding several patterns in a row
+  // (e.g. a batch of wildcard variants) doesn't mean reopening this
+  // modal from scratch each time.
+  async function handleSaveAndAddAnother() {
+    const saved = await saveRestriction();
+    if (saved) {
+      onSaved(saved);
+      setDomain('');
+      setPathPrefix('/');
+      domainInputRef.current?.focus();
     }
   }
 
@@ -63,15 +92,16 @@ export default function RestrictionFormModal({ groupId, existingRestriction, onC
             type="text"
             placeholder="e.g. youtube.com or *porn*.*"
             autoFocus
+            ref={domainInputRef}
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
           />
           {domainTooBroad ? (
-            <p style={{ fontSize: 12, color: '#b91c1c', marginTop: -8, marginBottom: 14 }}>
+            <p style={{ fontSize: 12, color: '#b91c1c', marginTop: 6, marginBottom: 0 }}>
               This matches every possible domain - narrow it down (e.g. "*porn*.*", not just "*").
             </p>
           ) : (
-            <p style={{ fontSize: 12, color: '#666', marginTop: -8, marginBottom: 14 }}>
+            <p style={{ fontSize: 12, color: '#666', marginTop: 6, marginBottom: 0 }}>
               Wildcards supported: <code>*</code> matches anything. <code>*porn*.*</code> blocks any
               domain containing "porn", under any TLD, including its subdomains. A plain domain like{' '}
               <code>youtube.com</code> still blocks that domain and all its subdomains automatically.
@@ -101,6 +131,16 @@ export default function RestrictionFormModal({ groupId, existingRestriction, onC
 
           <div className="modal-actions">
             <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+            {!isEditing && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleSaveAndAddAnother}
+                disabled={submitting || domainTooBroad}
+              >
+                Save &amp; Add Another
+              </button>
+            )}
             <button type="submit" className="btn" disabled={submitting || domainTooBroad}>
               {submitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Add Restriction'}
             </button>
