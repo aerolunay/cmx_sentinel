@@ -46,6 +46,21 @@ export const api = {
   setAgentStatus: (agentId, isActive) =>
     request(`/api/agents/${agentId}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) }),
   resetAgentPassword: (agentId) => request(`/api/agents/${agentId}/reset-password`, { method: 'POST' }),
+  // Same non-JSON multipart pattern as bulkUploadSchedules below.
+  async bulkUploadAgents(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch('/api/agents/bulk-upload', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Request failed (${response.status})`);
+    }
+    return data;
+  },
 
   listRecordings: () => request('/api/recordings'),
   getRecordingUrl: (key) => request(`/api/recordings/url?key=${encodeURIComponent(key)}`),

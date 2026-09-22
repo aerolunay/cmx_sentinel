@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import AgentFormModal from '../modals/AgentFormModal.jsx';
+import AgentBulkUploadModal from '../modals/AgentBulkUploadModal.jsx';
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([]);
@@ -9,6 +10,7 @@ export default function AgentsPage() {
   const [message, setMessage] = useState('');
   const [resettingId, setResettingId] = useState(null);
   const [modalAgent, setModalAgent] = useState(undefined); // undefined = closed, null = add mode, object = edit mode
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
 
   useEffect(() => {
     loadAgents();
@@ -64,7 +66,10 @@ export default function AgentsPage() {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Agents</h2>
-        <button className="btn" onClick={() => setModalAgent(null)}>+ Add Agent</button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" onClick={() => setShowBulkUpload(true)}>Bulk Upload</button>
+          <button className="btn" onClick={() => setModalAgent(null)}>+ Add Agent</button>
+        </div>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -123,6 +128,13 @@ export default function AgentsPage() {
         <AgentFormModal
           existingAgent={modalAgent}
           onClose={() => setModalAgent(undefined)}
+          onSaved={loadAgents}
+        />
+      )}
+
+      {showBulkUpload && (
+        <AgentBulkUploadModal
+          onClose={() => setShowBulkUpload(false)}
           onSaved={loadAgents}
         />
       )}

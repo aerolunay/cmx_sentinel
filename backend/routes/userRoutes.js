@@ -4,6 +4,7 @@ const express = require("express");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole } = require("../middleware/requireRole");
+const { sendWelcomeEmail } = require("../services/emailService");
 
 const router = express.Router();
 
@@ -92,6 +93,18 @@ router.post("/", async (req, res) => {
 
     if (GROUP_SCOPED_ROLES.includes(role)) {
       await setUserGroups(result.insertId, groupIds);
+    }
+
+    // Best-effort, not awaited-for-correctness in the sense of blocking
+    // the response - the account is already created either way, and a
+    // failed welcome email (bad SMTP creds, mail server hiccup) is not
+    // a reason to make user creation itself appear to fail. Logged so
+    // it isn't silently lost if SMTP really is misconfigured, though -
+    // see console.error below.
+    try {
+      await sendWelcomeEmail(email.trim(), displayName.trim(), role, trimmedIdentifier, usesEmployeeId);
+    } catch (emailErr) {
+      console.error(`Failed to send welcome email to new user ${result.insertId}:`, emailErr);
     }
 
     res.status(201).json({
