@@ -102,6 +102,16 @@ router.delete("/:groupId", async (req, res) => {
   }
 });
 
+// A wildcard-only pattern (just '*', '.', and whitespace, no real
+// substring left) would match literally every domain - almost
+// certainly a typo, not an intentional "block the entire internet for
+// this group" rule. Stripping '*' and '.' and requiring SOMETHING
+// left over catches "*", "*.*", "**", etc. while still allowing a
+// real pattern like "*porn*.*" (leaves "porn") through untouched.
+function isDangerouslyBroadPattern(domain) {
+  return domain.replace(/[*.\s]/g, "").length === 0;
+}
+
 router.get("/:groupId/restrictions", async (req, res) => {
   const { groupId } = req.params;
   try {
@@ -122,6 +132,9 @@ router.post("/:groupId/restrictions", async (req, res) => {
 
   if (!domain || !domain.trim()) {
     return res.status(400).json({ error: "Enter a domain to restrict." });
+  }
+  if (isDangerouslyBroadPattern(domain.trim())) {
+    return res.status(400).json({ error: "This pattern matches every possible domain - narrow it down (e.g. \"*porn*.*\", not just \"*\")." });
   }
 
   try {
@@ -150,6 +163,9 @@ router.put("/:groupId/restrictions/:restrictionId", async (req, res) => {
 
   if (!domain || !domain.trim()) {
     return res.status(400).json({ error: "Enter a domain to restrict." });
+  }
+  if (isDangerouslyBroadPattern(domain.trim())) {
+    return res.status(400).json({ error: "This pattern matches every possible domain - narrow it down (e.g. \"*porn*.*\", not just \"*\")." });
   }
 
   try {
