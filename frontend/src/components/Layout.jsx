@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useAppVersion } from '../hooks/useAppVersion.js';
 import AboutModal from '../modals/AboutModal.jsx';
 import logoWhite from '../assets/callmax_cover_removebg.png';
+import { formatRole } from '../utils/roles.js';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -17,7 +18,7 @@ export default function Layout() {
       <header>
         <img src={logoWhite} alt="CallMax" className="header-logo" />
         <div className="user-info">
-          {user?.displayName} ({user?.role})
+          {user?.displayName} ({formatRole(user?.role)})
           <a href="#" onClick={(e) => { e.preventDefault(); logout(); }}>Log out</a>
         </div>
       </header>

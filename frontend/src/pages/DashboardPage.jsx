@@ -5,6 +5,7 @@ import {
 import { useAuth } from '../context/AuthContext.jsx';
 import { api } from '../api.js';
 import Setup2FAModal from '../modals/Setup2FAModal.jsx';
+import { formatRole } from '../utils/roles.js';
 
 const PRODUCTIVE_AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Coaching', 'Meeting', 'Training'];
 const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle'];
@@ -217,7 +218,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <p>Logged in as <strong>{user?.displayName}</strong> ({user?.role}).</p>
+      <p>Logged in as <strong>{user?.displayName}</strong> ({formatRole(user?.role)}).</p>
 
       {!user?.totpEnabled && (
         <p>

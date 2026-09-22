@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import UserFormModal from '../modals/UserFormModal.jsx';
-
-function formatRole(role) {
-  if (role === 'super_admin') return 'Super Admin';
-  return role.charAt(0).toUpperCase() + role.slice(1);
-}
+import { formatRole } from '../utils/roles.js';
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
