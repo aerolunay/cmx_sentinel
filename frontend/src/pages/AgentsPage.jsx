@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import AgentFormModal from '../modals/AgentFormModal.jsx';
 import AgentBulkUploadModal from '../modals/AgentBulkUploadModal.jsx';
+import SortableTh, { toggleSort } from '../components/SortableTh.jsx';
+import { sortRows, matchesSearch } from '../utils/tableSort.js';
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([]);
@@ -11,6 +13,8 @@ export default function AgentsPage() {
   const [resettingId, setResettingId] = useState(null);
   const [modalAgent, setModalAgent] = useState(undefined); // undefined = closed, null = add mode, object = edit mode
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState({ key: null, dir: 'asc' });
 
   useEffect(() => {
     loadAgents();
@@ -62,6 +66,26 @@ export default function AgentsPage() {
     }
   }
 
+  // Search first (Name / Agent ID / Group, matching any one), then
+  // sort - order between the two doesn't matter functionally since
+  // sort doesn't change which rows are present, just their order.
+  const visibleAgents = useMemo(() => {
+    const filtered = agents.filter((a) =>
+      matchesSearch(search, [a.display_name, a.agent_id, a.group_name])
+    );
+    return sortRows(filtered, sort, (a) => {
+      switch (sort.key) {
+        case 'display_name': return a.display_name;
+        case 'agent_id': return a.agent_id;
+        case 'email': return a.email;
+        case 'group_name': return a.group_name;
+        case 'is_active': return a.is_active;
+        case 'must_reset_password': return a.must_reset_password;
+        default: return null;
+      }
+    });
+  }, [agents, search, sort]);
+
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -75,26 +99,36 @@ export default function AgentsPage() {
       {error && <div className="error">{error}</div>}
       {message && !error && <div className="message">{message}</div>}
 
+      <div style={{ marginBottom: 12 }}>
+        <input
+          type="text"
+          placeholder="Search by Name, Agent ID, or Group..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14, width: 320, maxWidth: '100%' }}
+        />
+      </div>
+
       {loading ? (
         <p>Loading...</p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Display Name</th>
-              <th>Agent ID</th>
-              <th>Email</th>
-              <th>Group</th>
-              <th>Status</th>
-              <th>Must Reset Password</th>
+              <SortableTh label="Display Name" sortKey="display_name" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
+              <SortableTh label="Agent ID" sortKey="agent_id" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
+              <SortableTh label="Email" sortKey="email" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
+              <SortableTh label="Group" sortKey="group_name" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
+              <SortableTh label="Status" sortKey="is_active" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
+              <SortableTh label="Must Reset Password" sortKey="must_reset_password" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {agents.length === 0 ? (
-              <tr><td colSpan={7}>No agents yet.</td></tr>
+            {visibleAgents.length === 0 ? (
+              <tr><td colSpan={7}>{agents.length === 0 ? 'No agents yet.' : 'No agents match your search.'}</td></tr>
             ) : (
-              agents.map((a) => (
+              visibleAgents.map((a) => (
                 <tr key={a.agent_id}>
                   <td>{a.display_name}</td>
                   <td>{a.agent_id}</td>
