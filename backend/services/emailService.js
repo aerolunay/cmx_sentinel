@@ -9,7 +9,7 @@ const PRODUCT_NAME = "CMX Sentinel Admin";
 // placeholder rather than throwing at startup like mailer.js's SMTP
 // vars do - a missing login link is a broken email, not a broken app,
 // so this degrades rather than taking down every other route.
-const ADMIN_APP_URL = process.env.ADMIN_APP_URL || "https://sentinel.callmaxsolutions.com";
+const ADMIN_APP_URL = process.env.ADMIN_APP_URL || "https://sentinel.cmxinnovations.com";
 
 // Mirrors formatRole() in frontend/src/utils/roles.js - kept as its own
 // small copy here (rather than importing across the frontend/backend
