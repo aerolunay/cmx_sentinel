@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api.js';
 import RestrictionFormModal from '../modals/RestrictionFormModal.jsx';
+import CopyRestrictionsModal from '../modals/CopyRestrictionsModal.jsx';
 
 export default function GroupDetailPage() {
   const { groupId } = useParams();
@@ -10,6 +11,7 @@ export default function GroupDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [modalRestriction, setModalRestriction] = useState(undefined); // undefined = closed, null = add, object = edit
+  const [showCopy, setShowCopy] = useState(false);
 
   const group = groups.find((g) => String(g.group_id) === groupId);
 
@@ -50,7 +52,17 @@ export default function GroupDetailPage() {
       <p><Link to="/groups">&larr; Back to Groups</Link></p>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>{group ? group.group_name : 'Group'} - Restrictions</h2>
-        <button className="btn" onClick={() => setModalRestriction(null)}>+ Add Restriction</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn-secondary"
+            onClick={() => setShowCopy(true)}
+            disabled={!group || restrictions.length === 0}
+            title={restrictions.length === 0 ? 'This group has no restrictions to copy.' : undefined}
+          >
+            Copy to Group...
+          </button>
+          <button className="btn" onClick={() => setModalRestriction(null)}>+ Add Restriction</button>
+        </div>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -94,6 +106,14 @@ export default function GroupDetailPage() {
           existingRestriction={modalRestriction}
           onClose={() => setModalRestriction(undefined)}
           onSaved={load}
+        />
+      )}
+
+      {showCopy && group && (
+        <CopyRestrictionsModal
+          sourceGroup={group}
+          groups={groups}
+          onClose={() => setShowCopy(false)}
         />
       )}
     </>

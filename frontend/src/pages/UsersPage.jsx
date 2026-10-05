@@ -108,9 +108,11 @@ export default function UsersPage() {
                   <td>{u.display_name}</td>
                   <td>{formatRole(u.role)}</td>
                   <td>
-                    {u.groups && u.groups.length > 0
-                      ? u.groups.map((g) => g.group_name).join(', ')
-                      : <em style={{ color: '#999' }}>-</em>}
+                    {u.role === 'manager'
+                      ? <em>All groups</em>
+                      : u.groups && u.groups.length > 0
+                        ? u.groups.map((g) => g.group_name).join(', ')
+                        : <em style={{ color: '#999' }}>-</em>}
                   </td>
                   <td>{u.login_identifier}</td>
                   <td>{u.email}</td>

@@ -81,6 +81,8 @@ export const api = {
     request(`/api/groups/${groupId}/restrictions/${restrictionId}`, { method: 'PUT', body: JSON.stringify(restriction) }),
   deleteRestriction: (groupId, restrictionId) =>
     request(`/api/groups/${groupId}/restrictions/${restrictionId}`, { method: 'DELETE' }),
+  copyRestrictions: (groupId, targetGroupId) =>
+    request(`/api/groups/${groupId}/restrictions/copy`, { method: 'POST', body: JSON.stringify({ targetGroupId }) }),
 
   getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
 

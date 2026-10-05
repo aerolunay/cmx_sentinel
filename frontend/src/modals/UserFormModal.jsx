@@ -9,7 +9,9 @@ const ROLES = [
   { value: 'manager', label: 'Manager' },
 ];
 
-const GROUP_SCOPED_ROLES = ['supervisor', 'manager'];
+// Mirrors backend/services/groupScope.js - Supervisors pick one or more
+// groups, everyone else (incl. Manager) sees all.
+const GROUP_SCOPED_ROLES = ['supervisor'];
 
 // Handles BOTH create and edit - pass existingUser to edit, omit it to
 // create. The form itself is identical either way, just a different

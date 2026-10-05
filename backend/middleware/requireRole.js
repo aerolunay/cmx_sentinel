@@ -6,7 +6,7 @@
 //
 // Super Admin gets everything. Admin gets everything EXCEPT Users and
 // Groups & Restrictions (super_admin-only). TQA/Supervisor/Manager get
-// Recordings + Reports - and for Supervisor/Manager specifically, those
+// Recordings + Reports - and for Supervisor specifically, those
 // are further scoped to their assigned groups (see web_user_groups,
 // enforced in recordingRoutes.js/reportRoutes.js, not here - this
 // middleware only checks ROLE, not group membership).

@@ -26,7 +26,9 @@ sql/               Numbered migrations, run in order against your
 ## Roles
 
 - **admin** - full access: Users, Groups & Restrictions, Agents, Recordings, Reports
-- **tqa / supervisor / manager** - Recordings + Reports only
+- **tqa / supervisor / manager** - Recordings + Reports only.
+  Supervisors see only their assigned groups (one or more); TQA and
+  Managers see all groups
 - **agent** - NOT a web app role at all - agents log into the DESKTOP
   app (CmxSentinelTray) with username/password, unrelated to this
   OTP-based web login

@@ -205,4 +205,58 @@ router.delete("/:groupId/restrictions/:restrictionId", async (req, res) => {
   }
 });
 
+// Copies every restriction from :groupId into another existing group.
+// Rules the target already has (same domain + path_prefix) are skipped
+// rather than duplicated, so copying twice is harmless. Active/disabled
+// state is carried over as-is.
+router.post("/:groupId/restrictions/copy", async (req, res) => {
+  const { groupId } = req.params;
+  const targetGroupId = Number(req.body?.targetGroupId);
+
+  if (!targetGroupId) {
+    return res.status(400).json({ error: "Select a group to copy to." });
+  }
+  if (targetGroupId === Number(groupId)) {
+    return res.status(400).json({ error: "Select a different group to copy to." });
+  }
+
+  try {
+    const [groupRows] = await db.query(
+      "SELECT group_id, group_name FROM agent_groups WHERE group_id IN (?, ?)",
+      [groupId, targetGroupId]
+    );
+    const source = groupRows.find((g) => g.group_id === Number(groupId));
+    const target = groupRows.find((g) => g.group_id === targetGroupId);
+    if (!source || !target) {
+      return res.status(404).json({ error: "Group not found." });
+    }
+
+    const [[{ total }]] = await db.query(
+      "SELECT COUNT(*) AS total FROM restricted_paths WHERE group_id = ?",
+      [groupId]
+    );
+    const [result] = await db.query(
+      `INSERT INTO restricted_paths (group_id, domain, path_prefix, is_active)
+       SELECT ?, src.domain, src.path_prefix, src.is_active
+       FROM restricted_paths src
+       WHERE src.group_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM restricted_paths dst
+           WHERE dst.group_id = ? AND dst.domain = src.domain AND dst.path_prefix = src.path_prefix
+         )`,
+      [targetGroupId, groupId, targetGroupId]
+    );
+    const copied = result.affectedRows;
+    const skipped = Number(total) - copied;
+
+    await logAction(req, "copied", "restriction", groupId,
+      `Copied ${copied} restriction(s) from group "${source.group_name}" to "${target.group_name}"` +
+      (skipped > 0 ? ` (${skipped} already present, skipped).` : "."));
+    res.json({ copied, skipped });
+  } catch (err) {
+    console.error("Error copying restrictions:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
 module.exports = router;

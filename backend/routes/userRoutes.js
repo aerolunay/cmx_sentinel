@@ -5,14 +5,11 @@ const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole } = require("../middleware/requireRole");
 const { sendWelcomeEmail } = require("../services/emailService");
+const { GROUP_SCOPED_ROLES } = require("../services/groupScope");
 
 const router = express.Router();
 
 const VALID_ROLES = ["super_admin", "admin", "tqa", "supervisor", "manager"];
-// Roles that get scoped to specific groups (see web_user_groups) -
-// Admin, Super Admin, and TQA see everything regardless, per the
-// explicit request that only these two roles are group-restricted.
-const GROUP_SCOPED_ROLES = ["supervisor", "manager"];
 const EMPLOYEE_ID_PATTERN = /^\d+$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
