@@ -56,6 +56,7 @@ export default function GroupsPage() {
         <table>
           <thead>
             <tr>
+              <th>Group ID</th>
               <th>Group Name</th>
               <th>Restrictions</th>
               <th></th>
@@ -63,10 +64,11 @@ export default function GroupsPage() {
           </thead>
           <tbody>
             {groups.length === 0 ? (
-              <tr><td colSpan={3}>No groups yet.</td></tr>
+              <tr><td colSpan={4}>No groups yet.</td></tr>
             ) : (
               groups.map((g) => (
                 <tr key={g.group_id}>
+                  <td>{g.group_id}</td>
                   <td><Link to={`/groups/${g.group_id}`}>{g.group_name}</Link></td>
                   <td>{g.restriction_count}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
