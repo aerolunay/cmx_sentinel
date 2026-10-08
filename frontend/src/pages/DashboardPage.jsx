@@ -6,31 +6,11 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { api } from '../api.js';
 import Setup2FAModal from '../modals/Setup2FAModal.jsx';
 import { formatRole } from '../utils/roles.js';
+import { AUX_COLORS, getEfficiencyColor, getAdherenceColor } from '../utils/metrics.js';
+import LiveAgentsPanel from '../components/LiveAgentsPanel.jsx';
 
 const PRODUCTIVE_AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Coaching', 'Meeting', 'Training'];
 const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle'];
-const AUX_COLORS = {
-  Production: '#1e3a8a', Admin: '#2563eb', Adhoc: '#3b82f6',
-  Lunch: '#c2660a', Break: '#d97706', Coaching: '#0d9488', Meeting: '#166534', Training: '#16a34a',
-  BioBreak: '#7c3aed', Idle: '#6b7280',
-};
-
-// Same thresholds as ReportsPage.jsx - kept consistent so "efficiency
-// %" means the same color everywhere in the app.
-function getEfficiencyColor(pct) {
-  if (pct >= 88) return '#1e3a8a'; // dark blue
-  if (pct >= 85) return '#166534'; // dark green
-  if (pct >= 80) return '#c2660a'; // orange
-  return '#b91c1c'; // red
-}
-
-// Same thresholds as ReportsPage.jsx's getAdherenceColor.
-function getAdherenceColor(pct) {
-  if (pct >= 95) return '#1e3a8a'; // dark blue
-  if (pct >= 90) return '#166534'; // dark green
-  if (pct >= 80) return '#c2660a'; // orange
-  return '#b91c1c'; // red
-}
 
 function getCurrentMonthEastern() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -231,63 +211,71 @@ export default function DashboardPage() {
 
       {error && <div className="error">{error}</div>}
 
-      {loading ? (
-        <p>Loading...</p>
-      ) : filteredRows.length === 0 ? (
-        <p>No data for this month{groupFilter || agentFilter ? ' / filter' : ''} yet.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-            <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
-              <h3 style={{ marginBottom: 4 }}>Month to Date Efficiency</h3>
-              <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(monthToDateEfficiency) }}>
-                {monthToDateEfficiency.toFixed(1)}%
+      <div className="dashboard-layout">
+        <div className="dashboard-main">
+          {loading ? (
+            <p>Loading...</p>
+          ) : filteredRows.length === 0 ? (
+            <p>No data for this month{groupFilter || agentFilter ? ' / filter' : ''} yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
+                  <h3 style={{ marginBottom: 4 }}>Month to Date Efficiency</h3>
+                  <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(monthToDateEfficiency) }}>
+                    {monthToDateEfficiency.toFixed(1)}%
+                  </div>
+                </div>
+
+                <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
+                  <h3 style={{ marginBottom: 4 }}>Month to Date Schedule Adherence</h3>
+                  {monthToDateAdherence == null ? (
+                    <div style={{ fontSize: 16, color: '#999', padding: '14px 0' }}>No schedule data for this month yet.</div>
+                  ) : (
+                    <div style={{ fontSize: 48, fontWeight: 700, color: getAdherenceColor(monthToDateAdherence) }}>
+                      {monthToDateAdherence.toFixed(1)}%
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="dashboard-card">
+                <h3>Efficiency Trend</h3>
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={efficiencyTrend} margin={{ top: 5, right: 20, left: 0, bottom: 24 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                    <XAxis dataKey="day" label={{ value: 'Day of Month', position: 'insideBottom', offset: -14 }} fontSize={12} />
+                    <YAxis domain={[0, 100]} unit="%" fontSize={12} />
+                    <Tooltip formatter={(value) => `${value}%`} labelFormatter={(day) => `Day ${day}`} />
+                    <Line type="monotone" dataKey="efficiency" stroke="#1e3a8a" strokeWidth={2} dot={{ r: 3 }} name="Efficiency %" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="dashboard-card">
+                <h3>Aux Code Breakdown (% of Total Time)</h3>
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={auxBreakdown}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                    <XAxis dataKey="aux" fontSize={12} angle={-20} textAnchor="end" height={60} />
+                    <YAxis unit="%" fontSize={12} />
+                    <Tooltip formatter={(value) => `${value}%`} />
+                    <Bar dataKey="pct" name="% of Total Time">
+                      {auxBreakdown.map((entry) => (
+                        <Cell key={entry.aux} fill={AUX_COLORS[entry.aux]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
-
-            <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
-              <h3 style={{ marginBottom: 4 }}>Month to Date Schedule Adherence</h3>
-              {monthToDateAdherence == null ? (
-                <div style={{ fontSize: 16, color: '#999', padding: '14px 0' }}>No schedule data for this month yet.</div>
-              ) : (
-                <div style={{ fontSize: 48, fontWeight: 700, color: getAdherenceColor(monthToDateAdherence) }}>
-                  {monthToDateAdherence.toFixed(1)}%
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="dashboard-card">
-            <h3>Efficiency Trend</h3>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={efficiencyTrend} margin={{ top: 5, right: 20, left: 0, bottom: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                <XAxis dataKey="day" label={{ value: 'Day of Month', position: 'insideBottom', offset: -14 }} fontSize={12} />
-                <YAxis domain={[0, 100]} unit="%" fontSize={12} />
-                <Tooltip formatter={(value) => `${value}%`} labelFormatter={(day) => `Day ${day}`} />
-                <Line type="monotone" dataKey="efficiency" stroke="#1e3a8a" strokeWidth={2} dot={{ r: 3 }} name="Efficiency %" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="dashboard-card">
-            <h3>Aux Code Breakdown (% of Total Time)</h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={auxBreakdown}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                <XAxis dataKey="aux" fontSize={12} angle={-20} textAnchor="end" height={60} />
-                <YAxis unit="%" fontSize={12} />
-                <Tooltip formatter={(value) => `${value}%`} />
-                <Bar dataKey="pct" name="% of Total Time">
-                  {auxBreakdown.map((entry) => (
-                    <Cell key={entry.aux} fill={AUX_COLORS[entry.aux]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          )}
         </div>
-      )}
+
+        <div className="dashboard-side">
+          <LiveAgentsPanel groupFilter={groupFilter} agentFilter={agentFilter} />
+        </div>
+      </div>
 
       {show2FAModal && (
         <Setup2FAModal

@@ -4,6 +4,8 @@ const express = require("express");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
 const { getScopedGroupIds } = require("../services/groupScope");
+const { toEasternSqlString } = require("../services/easternTime");
+const { DateTime } = require("luxon");
 
 const router = express.Router();
 
@@ -211,6 +213,150 @@ router.get("/efficiency", async (req, res) => {
     res.json(report);
   } catch (err) {
     console.error("Error generating efficiency report:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
+// An open aux_events row older than this is treated as a leftover from
+// a crashed/powered-off machine that never logged out, not a live agent.
+const MAX_OPEN_SEGMENT_HOURS = 16;
+
+// _est columns and agent_schedules are plain Eastern wall-clock values,
+// so they're compared as naive timestamps (parsed as if UTC) - the same
+// thing TIMESTAMPDIFF does with them in the efficiency query above.
+const EST_FORMAT = "%Y-%m-%d %H:%i:%s";
+const toMs = (sqlString) => DateTime.fromSQL(sqlString, { zone: "utc" }).toMillis();
+
+// Seconds of [start, end) that fall inside any of the given windows.
+function overlapSeconds(startMs, endMs, windows) {
+  let total = 0;
+  for (const w of windows) {
+    const s = Math.max(startMs, w.startMs);
+    const e = Math.min(endMs, w.endMs);
+    if (e > s) total += (e - s) / 1000;
+  }
+  return total;
+}
+
+// Agents currently logged in to the desktop app, with their current aux
+// and live efficiency/adherence for the shift they're on. "The shift"
+// is the Eastern calendar day their current login session started on,
+// so an overnight shift keeps counting past midnight instead of
+// resetting. Same rules as /efficiency: when that day has a schedule,
+// only time inside the scheduled windows counts. Adherence is measured
+// against the scheduled time ELAPSED SO FAR, not the whole shift, so it
+// isn't artificially low mid-shift.
+router.get("/live-agents", async (req, res) => {
+  try {
+    const scopedGroupIds = await getScopedGroupIds(req);
+    if (scopedGroupIds !== null && scopedGroupIds.length === 0) {
+      return res.json([]);
+    }
+
+    const now = new Date();
+    const nowEst = toEasternSqlString(now);
+    const nowMs = toMs(nowEst);
+    const cutoffEst = toEasternSqlString(new Date(now.getTime() - MAX_OPEN_SEGMENT_HOURS * 3600 * 1000));
+
+    const scopeCondition = scopedGroupIds !== null
+      ? `AND a.group_id IN (${scopedGroupIds.map(() => "?").join(",")})`
+      : "";
+
+    const [openRows] = await db.query(
+      `SELECT ae.event_id, ae.agent_id, a.display_name, a.group_id, g.group_name, ae.aux_code,
+              DATE_FORMAT(ae.started_at_est, '${EST_FORMAT}') AS aux_started_est,
+              DATE_FORMAT((
+                SELECT MIN(x.started_at_est) FROM aux_events x
+                WHERE x.agent_id = ae.agent_id AND x.login_session_id = ae.login_session_id
+              ), '${EST_FORMAT}') AS session_started_est
+       FROM aux_events ae
+       JOIN agents a ON a.agent_id = ae.agent_id
+       LEFT JOIN agent_groups g ON g.group_id = a.group_id
+       WHERE ae.ended_at_utc IS NULL AND ae.started_at_est >= ? ${scopeCondition}
+       ORDER BY ae.started_at_est DESC`,
+      [cutoffEst, ...(scopedGroupIds || [])]
+    );
+
+    // Normally one open row per agent; if a stale one slipped through,
+    // the most recent wins.
+    const current = new Map();
+    for (const row of openRows) {
+      if (!current.has(row.agent_id)) current.set(row.agent_id, row);
+    }
+    if (current.size === 0) {
+      return res.json([]);
+    }
+
+    const agentIds = [...current.keys()];
+    for (const row of current.values()) {
+      row.shiftDate = (row.session_started_est || row.aux_started_est).slice(0, 10);
+    }
+    const shiftDates = [...current.values()].map((r) => r.shiftDate).sort();
+    const earliestShiftDate = shiftDates[0];
+    const latestShiftDate = shiftDates[shiftDates.length - 1];
+
+    const [eventRows] = await db.query(
+      `SELECT event_id, agent_id, aux_code,
+              DATE_FORMAT(started_at_est, '${EST_FORMAT}') AS started_est,
+              DATE_FORMAT(ended_at_est, '${EST_FORMAT}') AS ended_est
+       FROM aux_events
+       WHERE agent_id IN (?) AND started_at_est >= ? AND started_at_est <= ?`,
+      [agentIds, `${earliestShiftDate} 00:00:00`, nowEst]
+    );
+
+    const [scheduleRows] = await db.query(
+      `SELECT agent_id, DATE_FORMAT(shift_date, '%Y-%m-%d') AS shift_date,
+              DATE_FORMAT(scheduled_start, '${EST_FORMAT}') AS start_est,
+              DATE_FORMAT(scheduled_end, '${EST_FORMAT}') AS end_est
+       FROM agent_schedules
+       WHERE agent_id IN (?) AND shift_date BETWEEN ? AND ?`,
+      [agentIds, earliestShiftDate, latestShiftDate]
+    );
+
+    const result = [...current.values()].map((cur) => {
+      const shiftStartMs = toMs(`${cur.shiftDate} 00:00:00`);
+      const windows = scheduleRows
+        .filter((s) => s.agent_id === cur.agent_id && s.shift_date === cur.shiftDate)
+        .map((s) => ({ startMs: toMs(s.start_est), endMs: toMs(s.end_est) }));
+      const hasSchedule = windows.length > 0;
+
+      let totalSeconds = 0;
+      let productiveSeconds = 0;
+      for (const ev of eventRows) {
+        if (ev.agent_id !== cur.agent_id) continue;
+        // Any other still-open row is a leftover, not live time.
+        if (!ev.ended_est && ev.event_id !== cur.event_id) continue;
+        const startMs = toMs(ev.started_est);
+        if (startMs < shiftStartMs) continue;
+        const endMs = Math.min(ev.ended_est ? toMs(ev.ended_est) : nowMs, nowMs);
+        const seconds = hasSchedule
+          ? overlapSeconds(startMs, endMs, windows)
+          : Math.max(0, (endMs - startMs) / 1000);
+        totalSeconds += seconds;
+        if (PRODUCTIVE_AUX_CODES.includes(ev.aux_code)) productiveSeconds += seconds;
+      }
+
+      const elapsedScheduledSeconds = windows.reduce(
+        (sum, w) => sum + Math.max(0, (Math.min(nowMs, w.endMs) - w.startMs) / 1000),
+        0
+      );
+
+      return {
+        agentId: cur.agent_id,
+        displayName: cur.display_name,
+        groupId: cur.group_id,
+        groupName: cur.group_name,
+        auxCode: cur.aux_code,
+        auxSeconds: Math.max(0, Math.round((nowMs - toMs(cur.aux_started_est)) / 1000)),
+        efficiencyPct: totalSeconds > 0 ? (productiveSeconds / totalSeconds) * 100 : null,
+        adherencePct: elapsedScheduledSeconds > 0 ? (totalSeconds / elapsedScheduledSeconds) * 100 : null,
+      };
+    });
+
+    result.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    res.json(result);
+  } catch (err) {
+    console.error("Error loading live agents:", err);
     res.status(500).json({ error: "A server error occurred." });
   }
 });

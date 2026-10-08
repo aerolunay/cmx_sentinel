@@ -85,6 +85,7 @@ export const api = {
     request(`/api/groups/${groupId}/restrictions/copy`, { method: 'POST', body: JSON.stringify({ targetGroupId }) }),
 
   getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
+  listLiveAgents: () => request('/api/reports/live-agents'),
 
   searchScheduleAgents: (q) => request(`/api/schedules/search-agents?${new URLSearchParams({ q })}`),
   // params can include any of: agentId, dateFrom, dateTo, q - only
