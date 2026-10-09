@@ -89,16 +89,42 @@ router.post("/auth/set-new-password", async (req, res) => {
 // service still tracks which event_id is currently "open" per agent in
 // its own memory (unchanged) - this just moves where the actual SQL
 // happens.
+//
+// Timestamps come from THIS server's clock, not the startedAtUtc /
+// endedAtUtc the desktop sends: an agent PC with a wrong clock (one was
+// ~1 hour fast) would otherwise put its whole day at the wrong times.
+// Safe because AuxEventLogger.cs reports each transition the moment it
+// happens, with no offline queue or retry - arrival time IS the
+// transition time, give or take network latency. The desktop's own
+// value is still accepted (older builds send it) and only used to log
+// PCs whose clocks are noticeably off.
 // ---------------------------------------------------------------------
+
+const CLOCK_SKEW_WARN_MS = 2 * 60 * 1000;
+const CLOCK_SKEW_WARN_EVERY_MS = 60 * 60 * 1000;
+const lastSkewWarningByMachine = new Map();
+
+function warnIfClockSkewed(machineName, clientTimestamp, serverNow) {
+  const clientDate = clientTimestamp ? new Date(clientTimestamp) : null;
+  if (!clientDate || Number.isNaN(clientDate.getTime())) return;
+  const skewMs = clientDate.getTime() - serverNow.getTime();
+  if (Math.abs(skewMs) < CLOCK_SKEW_WARN_MS) return;
+  const key = machineName || "unknown";
+  const last = lastSkewWarningByMachine.get(key) || 0;
+  if (serverNow.getTime() - last < CLOCK_SKEW_WARN_EVERY_MS) return;
+  lastSkewWarningByMachine.set(key, serverNow.getTime());
+  console.warn(`Clock on ${key} is off by ${Math.round(skewMs / 1000)}s - using server time for its aux events.`);
+}
 
 router.post("/aux-events/open", async (req, res) => {
   const { agentId, sessionId, machineName, auxCode, startedAtUtc } = req.body || {};
-  if (!agentId || !sessionId || !machineName || !auxCode || !startedAtUtc) {
-    return res.status(400).json({ error: "agentId, sessionId, machineName, auxCode, and startedAtUtc are all required." });
+  if (!agentId || !sessionId || !machineName || !auxCode) {
+    return res.status(400).json({ error: "agentId, sessionId, machineName, and auxCode are all required." });
   }
 
   try {
-    const startedAtUtcDate = new Date(startedAtUtc);
+    const startedAtUtcDate = new Date();
+    warnIfClockSkewed(machineName, startedAtUtc, startedAtUtcDate);
     const [result] = await db.query(
       `INSERT INTO aux_events (agent_id, login_session_id, machine_name, aux_code, started_at_utc, started_at_est)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -112,18 +138,24 @@ router.post("/aux-events/open", async (req, res) => {
 });
 
 router.post("/aux-events/close", async (req, res) => {
-  const { eventId, endedAtUtc, logoutTrigger } = req.body || {};
-  if (!eventId || !endedAtUtc) {
-    return res.status(400).json({ error: "eventId and endedAtUtc are required." });
+  const { eventId, logoutTrigger } = req.body || {};
+  if (!eventId) {
+    return res.status(400).json({ error: "eventId is required." });
   }
 
   try {
-    const endedAtUtcDate = new Date(endedAtUtc);
+    // Server time, same as /open (the request's endedAtUtc is ignored;
+    // skew is already logged when the PC opens its next segment).
+    const endedAtUtcDate = new Date();
+    // GREATEST guards a row that a fast-clocked PC opened BEFORE the
+    // switch to server time: its start can be later than "now", and it
+    // must not end up with an end before its start or a negative
+    // duration.
     await db.query(
       `UPDATE aux_events
-       SET ended_at_utc = ?,
-           ended_at_est = ?,
-           duration_seconds = TIMESTAMPDIFF(SECOND, started_at_utc, ?),
+       SET ended_at_utc = GREATEST(started_at_utc, ?),
+           ended_at_est = GREATEST(started_at_est, ?),
+           duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_utc, ?)),
            logout_trigger = ?
        WHERE event_id = ?`,
       [endedAtUtcDate, toEasternSqlString(endedAtUtcDate), endedAtUtcDate, logoutTrigger || null, eventId]
