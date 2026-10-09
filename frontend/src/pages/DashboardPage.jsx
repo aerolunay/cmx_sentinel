@@ -142,7 +142,7 @@ export default function DashboardPage() {
       if (!r.hasSchedule) continue;
       hasAnySchedule = true;
       scheduledHours += r.scheduledHours || 0;
-      scheduledLoggedHours += r.totalHours;
+      scheduledLoggedHours += r.adherentHours ?? r.totalHours; // includes credited reconnect gaps
     }
     return hasAnySchedule && scheduledHours > 0 ? (scheduledLoggedHours / scheduledHours) * 100 : null;
   }, [filteredRows]);

@@ -44,7 +44,8 @@ function formatMonthLabel(monthStr) {
 // freely mix both kinds of days (e.g. schedule sync only recently
 // started); scheduledHours/adherencePct are accumulated ONLY from days
 // that actually have a schedule, so a day with no schedule simply
-// doesn't affect the adherence figure either way.
+// doesn't affect the adherence figure either way. adherentHours
+// includes credited reconnect gaps between logins - see reportRoutes.js.
 function aggregateMonthly(dailyRows) {
   const grouped = new Map();
 
@@ -60,7 +61,7 @@ function aggregateMonthly(dailyRows) {
         groupName: r.groupName,
         auxHours: {},
         scheduledHours: 0,
-        scheduledLoggedHours: 0,
+        adherentHours: 0,
         hasAnySchedule: false,
       });
     }
@@ -71,7 +72,7 @@ function aggregateMonthly(dailyRows) {
     if (r.hasSchedule) {
       entry.hasAnySchedule = true;
       entry.scheduledHours += r.scheduledHours || 0;
-      entry.scheduledLoggedHours += r.totalHours;
+      entry.adherentHours += r.adherentHours ?? r.totalHours;
     }
   }
 
@@ -84,7 +85,7 @@ function aggregateMonthly(dailyRows) {
         totalHours,
         efficiencyPct: totalHours > 0 ? (productiveHours / totalHours) * 100 : 0,
         adherencePct: entry.hasAnySchedule && entry.scheduledHours > 0
-          ? (entry.scheduledLoggedHours / entry.scheduledHours) * 100
+          ? (entry.adherentHours / entry.scheduledHours) * 100
           : null,
       };
     })

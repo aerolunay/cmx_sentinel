@@ -103,9 +103,11 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
                   {agent.adherencePct == null ? 'N/A' : `${agent.adherencePct.toFixed(1)}%`}
                 </div>
                 <div className="live-detail-small">
-                  {hasSchedule
-                    ? `${formatDuration(d.countedSeconds)} logged ÷ ${formatDuration(d.elapsedScheduledSeconds)} scheduled so far`
-                    : 'No schedule for this shift'}
+                  {!hasSchedule
+                    ? 'No schedule for this shift'
+                    : d.creditedGapSeconds > 0
+                      ? `(${formatDuration(d.countedSeconds)} logged + ${formatDuration(d.creditedGapSeconds)} reconnect gaps) ÷ ${formatDuration(d.elapsedScheduledSeconds)} scheduled so far`
+                      : `${formatDuration(d.countedSeconds)} logged ÷ ${formatDuration(d.elapsedScheduledSeconds)} scheduled so far`}
                 </div>
               </div>
             </div>
@@ -135,7 +137,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
             <h3>Sentinel Desktop Logins</h3>
             <table>
               <thead>
-                <tr><th>PC</th><th>Login</th><th>Logout</th></tr>
+                <tr><th>PC</th><th>Login</th><th>Logout</th><th title="Time not logged in since the previous logout">Gap Before</th></tr>
               </thead>
               <tbody>
                 {d.sessions.map((s) => (
@@ -154,10 +156,29 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
                         </>
                       )}
                     </td>
+                    <td>
+                      {!s.gapBefore ? (
+                        '-'
+                      ) : (
+                        <>
+                          {formatDuration(s.gapBefore.seconds)}
+                          <span className="live-detail-small">
+                            {s.gapBefore.afterIdle
+                              ? ' (not credited - logged out from Idle)'
+                              : s.gapBefore.creditedSeconds > 0 ? ' (credited)' : ''}
+                          </span>
+                        </>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {hasSchedule && d.sessions.length > 1 && (
+              <p className="live-detail-note">
+                Gaps between logins count toward adherence, unless the agent was in Idle right before logging out.
+              </p>
+            )}
 
             <h3>Aux Time This Shift</h3>
             <table>

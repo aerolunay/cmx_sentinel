@@ -19,6 +19,45 @@ router.use(requireAuth);
 // trigger set, by explicit request.
 const PRODUCTIVE_AUX_CODES = ["Production", "Admin", "Adhoc", "Coaching", "Meeting", "Training"];
 
+// _est columns and agent_schedules are plain Eastern wall-clock values,
+// so they're compared as naive timestamps (parsed as if UTC) - the same
+// thing TIMESTAMPDIFF does with them in the SQL below.
+const EST_FORMAT = "%Y-%m-%d %H:%i:%s";
+const toMs = (sqlString) => DateTime.fromSQL(sqlString, { zone: "utc" }).toMillis();
+
+// Seconds of [start, end) that fall inside any of the given windows.
+function overlapSeconds(startMs, endMs, windows) {
+  let total = 0;
+  for (const w of windows) {
+    const s = Math.max(startMs, w.startMs);
+    const e = Math.min(endMs, w.endMs);
+    if (e > s) total += (e - s) / 1000;
+  }
+  return total;
+}
+
+// Adherence rule shared by /efficiency and /live-agents: once an agent
+// has logged in, a gap between one desktop login ending and the next
+// starting (reconnects, remote_login, switching PCs) still counts as
+// adherent time - UNLESS they were in Idle right before logging out,
+// i.e. they actually left. Time before the first login (a late start)
+// and after the last logout (leaving early) is never a "gap" and never
+// credited. Efficiency is unaffected - it stays based on real aux time.
+//
+// `sessions` must be sorted by startMs; endMs is null for a login with
+// no closed segment yet (still active). Returns one entry per gap; the
+// caller decides how much of it falls inside the schedule.
+function findLoginGaps(sessions) {
+  const gaps = [];
+  for (let i = 1; i < sessions.length; i++) {
+    const prev = sessions[i - 1];
+    const next = sessions[i];
+    if (prev.endMs == null || next.startMs <= prev.endMs) continue;
+    gaps.push({ nextIndex: i, startMs: prev.endMs, endMs: next.startMs, afterIdle: prev.lastAuxCode === "Idle" });
+  }
+  return gaps;
+}
+
 // Shared by all three queries below so the agent/group/date filtering
 // logic (including manager/supervisor group-scoping) can't drift
 // between them - they need to agree on exactly which agents and which
@@ -137,6 +176,79 @@ router.get("/efficiency", async (req, res) => {
       overlapFilter.params
     );
 
+    // Query 4 + 5 - reconnect gaps (see findLoginGaps). Query 4 lists the
+    // individual schedule windows; Query 5 summarises each desktop login
+    // (first start, last close, aux it was closed from) for the agents
+    // that have them. The login range is widened a day either side so
+    // overnight shifts and logins that started the day before are seen.
+    // Each gap is credited to whichever schedule window(s) it overlaps.
+    const creditedGapSeconds = new Map(); // "agentId|shiftDate" -> seconds
+    const windowFilter = buildConditions("s.shift_date", filters);
+    const [windowRows] = await db.query(
+      `SELECT s.agent_id, DATE_FORMAT(s.shift_date, '%Y-%m-%d') AS shift_date,
+              DATE_FORMAT(s.scheduled_start, '${EST_FORMAT}') AS start_est,
+              DATE_FORMAT(s.scheduled_end, '${EST_FORMAT}') AS end_est
+       FROM agent_schedules s
+       JOIN agents a ON a.agent_id = s.agent_id
+       WHERE ${windowFilter.conditions.join(" AND ")}`,
+      windowFilter.params
+    );
+
+    if (windowRows.length > 0) {
+      const windowsByAgent = new Map();
+      for (const w of windowRows) {
+        if (!windowsByAgent.has(w.agent_id)) windowsByAgent.set(w.agent_id, []);
+        windowsByAgent.get(w.agent_id).push({ shiftDate: w.shift_date, startMs: toMs(w.start_est), endMs: toMs(w.end_est) });
+      }
+
+      const sessionFilter = buildConditions("DATE(ae.started_at_est)", {
+        ...filters,
+        dateFrom: DateTime.fromISO(dateFrom).minus({ days: 1 }).toISODate(),
+        dateTo: DateTime.fromISO(dateTo).plus({ days: 1 }).toISODate(),
+      });
+      const [sessionRows] = await db.query(
+        `SELECT ae.agent_id,
+                DATE_FORMAT(MIN(ae.started_at_est), '${EST_FORMAT}') AS start_est,
+                DATE_FORMAT(MAX(ae.ended_at_est), '${EST_FORMAT}') AS end_est,
+                SUBSTRING_INDEX(
+                  GROUP_CONCAT(CASE WHEN ae.ended_at_est IS NOT NULL THEN ae.aux_code END ORDER BY ae.ended_at_est DESC),
+                  ',', 1
+                ) AS last_aux
+         FROM aux_events ae
+         JOIN agents a ON a.agent_id = ae.agent_id
+         WHERE ${sessionFilter.conditions.join(" AND ")}
+           AND ae.login_session_id IS NOT NULL
+           AND ae.agent_id IN (?)
+         GROUP BY ae.agent_id, ae.login_session_id`,
+        [...sessionFilter.params, [...windowsByAgent.keys()]]
+      );
+
+      const sessionsByAgent = new Map();
+      for (const row of sessionRows) {
+        if (!sessionsByAgent.has(row.agent_id)) sessionsByAgent.set(row.agent_id, []);
+        sessionsByAgent.get(row.agent_id).push({
+          startMs: toMs(row.start_est),
+          endMs: row.end_est ? toMs(row.end_est) : null,
+          lastAuxCode: row.last_aux,
+        });
+      }
+
+      for (const [agentKey, agentSessions] of sessionsByAgent) {
+        agentSessions.sort((a, b) => a.startMs - b.startMs);
+        const agentWindows = windowsByAgent.get(agentKey) || [];
+        for (const gap of findLoginGaps(agentSessions)) {
+          if (gap.afterIdle) continue;
+          for (const w of agentWindows) {
+            const seconds = overlapSeconds(gap.startMs, gap.endMs, [w]);
+            if (seconds > 0) {
+              const key = `${agentKey}|${w.shiftDate}`;
+              creditedGapSeconds.set(key, (creditedGapSeconds.get(key) || 0) + seconds);
+            }
+          }
+        }
+      }
+    }
+
     // Merge all three into one (agent, day) map. Every key present in
     // scheduleRows has a real schedule for that day (even if
     // overlapRows has nothing for it, e.g. the agent never logged in
@@ -186,6 +298,11 @@ router.get("/efficiency", async (req, res) => {
         0
       );
 
+      const creditedSeconds = entry.hasSchedule
+        ? creditedGapSeconds.get(`${entry.agentId}|${entry.date}`) || 0
+        : 0;
+      const adherentSeconds = totalSeconds + creditedSeconds;
+
       return {
         date: entry.date,
         agentId: entry.agentId,
@@ -202,8 +319,13 @@ router.get("/efficiency", async (req, res) => {
         // it doesn't, so the frontend can render "N/A" instead of a
         // misleading 0%.
         scheduledHours: entry.hasSchedule ? entry.scheduledSeconds / 3600 : null,
+        // Logged time within schedule plus credited reconnect gaps -
+        // the numerator of adherencePct, exposed so monthly/dashboard
+        // totals can sum it the same way.
+        creditedGapHours: entry.hasSchedule ? creditedSeconds / 3600 : null,
+        adherentHours: entry.hasSchedule ? adherentSeconds / 3600 : null,
         adherencePct: entry.hasSchedule && entry.scheduledSeconds > 0
-          ? (totalSeconds / entry.scheduledSeconds) * 100
+          ? (adherentSeconds / entry.scheduledSeconds) * 100
           : null,
       };
     });
@@ -221,23 +343,6 @@ router.get("/efficiency", async (req, res) => {
 // a crashed/powered-off machine that never logged out, not a live agent.
 const MAX_OPEN_SEGMENT_HOURS = 16;
 
-// _est columns and agent_schedules are plain Eastern wall-clock values,
-// so they're compared as naive timestamps (parsed as if UTC) - the same
-// thing TIMESTAMPDIFF does with them in the efficiency query above.
-const EST_FORMAT = "%Y-%m-%d %H:%i:%s";
-const toMs = (sqlString) => DateTime.fromSQL(sqlString, { zone: "utc" }).toMillis();
-
-// Seconds of [start, end) that fall inside any of the given windows.
-function overlapSeconds(startMs, endMs, windows) {
-  let total = 0;
-  for (const w of windows) {
-    const s = Math.max(startMs, w.startMs);
-    const e = Math.min(endMs, w.endMs);
-    if (e > s) total += (e - s) / 1000;
-  }
-  return total;
-}
-
 // Agents currently logged in to the desktop app, with their current aux
 // and live efficiency/adherence for the shift they're on - optionally
 // narrowed to one agent. "The shift" is the Eastern calendar day their
@@ -246,7 +351,8 @@ function overlapSeconds(startMs, endMs, windows) {
 // /efficiency: when that day has a schedule, only time inside the
 // scheduled windows counts. Adherence is measured against the scheduled
 // time ELAPSED SO FAR, not the whole shift, so it isn't artificially
-// low mid-shift.
+// low mid-shift, and short gaps between logins are credited (see the
+// gap loop below).
 //
 // Each result carries a `detail` object (schedule windows, login
 // sessions, per-aux time) - the list endpoint drops it to keep the
@@ -363,16 +469,37 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       // the first aux segment, its end the last one to close.
       const sessionKey = ev.login_session_id || `event-${ev.event_id}`;
       const session = sessions.get(sessionKey) || {
-        machineName: ev.machine_name, start: ev.started_est, end: null, isActive: false, logoutTrigger: null,
+        machineName: ev.machine_name, start: ev.started_est, end: null, isActive: false,
+        logoutTrigger: null, lastAuxCode: null,
       };
       if (isCurrent) {
         session.isActive = true;
       } else if (!session.end || ev.ended_est > session.end) {
         session.end = ev.ended_est;
         session.logoutTrigger = ev.logout_trigger || null;
+        session.lastAuxCode = ev.aux_code;
       }
       sessions.set(sessionKey, session);
     }
+
+    // Reconnect gaps between logins - see findLoginGaps.
+    const orderedSessions = [...sessions.values()].sort((a, b) => a.start.localeCompare(b.start));
+    let creditedGapSeconds = 0;
+    const gaps = findLoginGaps(orderedSessions.map((s) => ({
+      startMs: toMs(s.start),
+      endMs: s.isActive || !s.end ? null : toMs(s.end),
+      lastAuxCode: s.lastAuxCode,
+    })));
+    for (const gap of gaps) {
+      const credited = hasSchedule && !gap.afterIdle ? overlapSeconds(gap.startMs, gap.endMs, windows) : 0;
+      orderedSessions[gap.nextIndex].gapBefore = {
+        seconds: Math.round((gap.endMs - gap.startMs) / 1000),
+        creditedSeconds: Math.round(credited),
+        afterIdle: gap.afterIdle,
+      };
+      creditedGapSeconds += credited;
+    }
+    const adherentSeconds = countedSeconds + creditedGapSeconds;
 
     const scheduledSeconds = windows.reduce((sum, w) => sum + (w.endMs - w.startMs) / 1000, 0);
     const elapsedScheduledSeconds = windows.reduce(
@@ -389,16 +516,18 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       auxCode: cur.aux_code,
       auxSeconds: Math.max(0, Math.round((nowMs - toMs(cur.aux_started_est)) / 1000)),
       efficiencyPct: countedSeconds > 0 ? (productiveSeconds / countedSeconds) * 100 : null,
-      adherencePct: elapsedScheduledSeconds > 0 ? (countedSeconds / elapsedScheduledSeconds) * 100 : null,
+      adherencePct: elapsedScheduledSeconds > 0 ? (adherentSeconds / elapsedScheduledSeconds) * 100 : null,
       detail: {
         shiftDate: cur.shiftDate,
         asOf: nowEst,
         schedule: schedule.map((s) => ({ shiftType: s.shift_type, start: s.start_est, end: s.end_est })),
-        sessions: [...sessions.values()].map((s) => ({
+        sessions: orderedSessions.map((s) => ({
           machineName: s.machineName,
           start: s.start,
           end: s.isActive ? null : s.end,
           logoutTrigger: s.isActive ? null : s.logoutTrigger,
+          lastAuxCode: s.isActive ? null : s.lastAuxCode,
+          gapBefore: s.gapBefore || null,
         })),
         aux: [...auxTotals.entries()]
           .map(([auxCode, t]) => ({
@@ -411,6 +540,8 @@ async function loadLiveAgents(req, onlyAgentId = null) {
         loggedSeconds: Math.round(loggedSeconds),
         countedSeconds: Math.round(countedSeconds),
         productiveSeconds: Math.round(productiveSeconds),
+        creditedGapSeconds: Math.round(creditedGapSeconds),
+        adherentSeconds: Math.round(adherentSeconds),
         scheduledSeconds: hasSchedule ? Math.round(scheduledSeconds) : null,
         elapsedScheduledSeconds: hasSchedule ? Math.round(elapsedScheduledSeconds) : null,
       },
