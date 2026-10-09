@@ -6,8 +6,21 @@ const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole } = require("../middleware/requireRole");
 const { requireInternalApiKey } = require("../middleware/requireInternalApiKey");
 const { sendViolationAlertEmail } = require("../services/emailService");
+const { getBooleanSetting, setBooleanSetting } = require("../services/appSettings");
+const { logAction } = require("../services/auditLog");
 
 const router = express.Router();
+
+// On/off switch for the alert emails, set from the Violations page.
+// Until someone saves it, VIOLATION_ALERT_EMAILS in .env decides (on
+// unless it's "false"). Every alert goes to every admin and shares the
+// SES quota with OTP and temp-password emails, so this needs to be
+// easy to turn off.
+const ALERT_EMAILS_SETTING = "violation_alert_emails";
+
+function violationAlertsEnabled() {
+  return getBooleanSetting(ALERT_EMAILS_SETTING, process.env.VIOLATION_ALERT_EMAILS !== "false");
+}
 
 // Called by the DESKTOP SERVICE (ProxyEnforcer.cs / ViolationReporter.cs)
 // the moment a restricted site gets blocked - not a browser session, so
@@ -32,12 +45,9 @@ router.post("/", requireInternalApiKey, async (req, res) => {
       [agentId, groupId, domain, path || "/", blockedAt]
     );
 
-    // VIOLATION_ALERT_EMAILS=false in .env turns the emails off - the
-    // violation is still logged above and listed on the Violations page.
-    // Every alert goes to every admin, so this is the quickest way to
-    // stop burning the shared SES quota (OTP and temp-password emails
-    // use it too).
-    if (process.env.VIOLATION_ALERT_EMAILS === "false") {
+    // Alerts turned off (Violations page toggle) - the violation is
+    // still logged above and listed on the Violations page.
+    if (!(await violationAlertsEnabled())) {
       return res.status(201).json({ logged: true });
     }
 
@@ -81,6 +91,37 @@ router.get("/", requireAuth, requireRole("admin", "super_admin"), async (req, re
     res.json(rows);
   } catch (err) {
     console.error("Error listing violations:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
+router.get("/settings", requireAuth, requireRole("admin", "super_admin"), async (req, res) => {
+  try {
+    res.json({ alertEmails: await violationAlertsEnabled() });
+  } catch (err) {
+    console.error("Error reading violation settings:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
+// Admins can see whether alerts are on (GET above); only Super Admin
+// can change it.
+router.put("/settings", requireAuth, requireRole("super_admin"), async (req, res) => {
+  const { alertEmails } = req.body || {};
+  if (typeof alertEmails !== "boolean") {
+    return res.status(400).json({ error: "alertEmails must be true or false." });
+  }
+
+  try {
+    await setBooleanSetting(ALERT_EMAILS_SETTING, alertEmails, req.session.userId);
+    await logAction(req, "updated", "setting", ALERT_EMAILS_SETTING,
+      `Turned violation email alerts ${alertEmails ? "on" : "off"}.`);
+    res.json({ alertEmails });
+  } catch (err) {
+    if (err.code === "ER_NO_SUCH_TABLE") {
+      return res.status(500).json({ error: "Settings table is missing - run sql/004_create_app_settings.sql first." });
+    }
+    console.error("Error saving violation settings:", err);
     res.status(500).json({ error: "A server error occurred." });
   }
 });

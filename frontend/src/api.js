@@ -124,4 +124,7 @@ export const api = {
   listAuditLog: () => request('/api/audit-log'),
 
   listViolations: () => request('/api/violations'),
+  getViolationSettings: () => request('/api/violations/settings'),
+  setViolationAlertEmails: (alertEmails) =>
+    request('/api/violations/settings', { method: 'PUT', body: JSON.stringify({ alertEmails }) }),
 };
