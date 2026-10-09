@@ -161,3 +161,18 @@ label { margin-right: 6px; }
 .live-agents th { position: sticky; top: 0; }
 .live-agents-group { font-size: 11px; color: #888; }
 .aux-badge { display: inline-block; color: white; border-radius: 4px; padding: 2px 6px; font-size: 12px; white-space: nowrap; }
+.live-agents-name { cursor: pointer; user-select: none; }
+.live-agents-name:hover { text-decoration: underline; }
+
+/* Live agent detail modal */
+.live-detail { width: 720px; max-height: 90vh; overflow-y: auto; }
+.live-detail h3 { font-size: 14px; margin: 20px 0 8px; color: #1a2b4a; }
+.live-detail table { box-shadow: none; border: 1px solid #eee; }
+.live-detail th, .live-detail td { padding: 6px 10px; font-size: 13px; }
+.live-detail-sub { font-size: 13px; color: #666; margin-bottom: 16px; }
+.live-detail-tiles { display: flex; gap: 12px; flex-wrap: wrap; }
+.live-detail-tile { flex: 1 1 180px; background: #f7f8fa; border-radius: 8px; padding: 12px 14px; }
+.live-detail-label { font-size: 12px; color: #666; margin-bottom: 6px; }
+.live-detail-value { font-size: 28px; font-weight: 700; line-height: 1.1; }
+.live-detail-small { font-size: 12px; color: #888; margin-top: 4px; }
+.live-detail-note { font-size: 13px; color: #666; margin: 8px 0 0; }

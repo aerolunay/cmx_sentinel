@@ -1,15 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { AUX_COLORS, getEfficiencyColor, getAdherenceColor } from '../utils/metrics.js';
+import { AUX_COLORS, getEfficiencyColor, getAdherenceColor, formatDuration } from '../utils/metrics.js';
+import LiveAgentDetailModal from '../modals/LiveAgentDetailModal.jsx';
 
 const REFRESH_MS = 5000;
-
-function formatDuration(totalSeconds) {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
 
 // Agents currently logged in to the Sentinel desktop app. Reloaded from
 // the server every 5s (paused while the browser tab is hidden, so idle
@@ -21,6 +15,7 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
   const [now, setNow] = useState(Date.now());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [detailAgentId, setDetailAgentId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +85,11 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
             <tbody>
               {visibleAgents.map((a) => (
                 <tr key={a.agentId}>
-                  <td>
+                  <td
+                    className="live-agents-name"
+                    title="Double-click for details"
+                    onDoubleClick={() => setDetailAgentId(a.agentId)}
+                  >
                     <div>{a.displayName}</div>
                     {a.groupName && <div className="live-agents-group">{a.groupName}</div>}
                   </td>
@@ -111,6 +110,10 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {detailAgentId && (
+        <LiveAgentDetailModal agentId={detailAgentId} onClose={() => setDetailAgentId(null)} />
       )}
     </div>
   );

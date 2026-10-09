@@ -107,22 +107,25 @@ router.get("/", async (req, res) => {
       };
     });
 
-    const recordings = [...liveRecordings, ...archivedRecordings].sort(
-      (a, b) => new Date(b.recordedAt) - new Date(a.recordedAt)
-    );
+    // Recordings come from S3 filenames, not a DB query - so the
+    // agent's full name and group come from cross-referencing the
+    // parsed agentId against the agents table here, unlike
+    // reportRoutes.js where a JOIN does this as part of the query.
+    // displayName is null for an agent ID that's no longer in the
+    // table; the frontend falls back to the filename's sanitizedName.
+    const [agentRows] = await db.query("SELECT agent_id, display_name, group_id FROM agents");
+    const agentsById = new Map(agentRows.map((a) => [String(a.agent_id), a]));
 
-    // Recordings come from S3 filenames, not a DB query - so scoping
-    // by group means cross-referencing the parsed agentId against the
-    // agents table here, unlike reportRoutes.js where the JOIN does
-    // this naturally as part of the query itself.
+    const recordings = [...liveRecordings, ...archivedRecordings]
+      .map((r) => ({ ...r, displayName: agentsById.get(String(r.agentId))?.display_name ?? null }))
+      .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt));
+
     const scopedGroupIds = await getScopedGroupIds(req);
     if (scopedGroupIds !== null) {
       if (scopedGroupIds.length === 0) {
         return res.json([]);
       }
-      const [agentRows] = await db.query("SELECT agent_id, group_id FROM agents");
-      const agentToGroup = new Map(agentRows.map((a) => [a.agent_id, a.group_id]));
-      const allowed = recordings.filter((r) => scopedGroupIds.includes(agentToGroup.get(r.agentId)));
+      const allowed = recordings.filter((r) => scopedGroupIds.includes(agentsById.get(String(r.agentId))?.group_id));
       return res.json(allowed);
     }
 

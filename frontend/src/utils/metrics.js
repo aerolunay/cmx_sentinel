@@ -8,6 +8,13 @@ export const AUX_COLORS = {
   BioBreak: '#7c3aed', Idle: '#6b7280',
 };
 
+export function formatDuration(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 export function getEfficiencyColor(pct) {
   if (pct >= 88) return '#1e3a8a'; // dark blue
   if (pct >= 85) return '#166534'; // dark green

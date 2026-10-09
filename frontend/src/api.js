@@ -86,6 +86,7 @@ export const api = {
 
   getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
   listLiveAgents: () => request('/api/reports/live-agents'),
+  getLiveAgent: (agentId) => request(`/api/reports/live-agents/${encodeURIComponent(agentId)}`),
 
   searchScheduleAgents: (q) => request(`/api/schedules/search-agents?${new URLSearchParams({ q })}`),
   // params can include any of: agentId, dateFrom, dateTo, q - only

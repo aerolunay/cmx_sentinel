@@ -3,6 +3,12 @@ import { api } from '../api.js';
 import RecordingPlaybackModal from '../modals/RecordingPlaybackModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
+// Full name from the agents table when the agent still exists there,
+// otherwise the lowercase name baked into the recording's filename.
+function agentName(r) {
+  return r.displayName || r.sanitizedName;
+}
+
 function formatSize(bytes) {
   if (bytes == null) return '—';
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -59,7 +65,7 @@ export default function RecordingsPage() {
   const agentOptions = useMemo(() => {
     const seen = new Map();
     for (const r of recordings) {
-      if (!seen.has(r.agentId)) seen.set(r.agentId, r.sanitizedName);
+      if (!seen.has(r.agentId)) seen.set(r.agentId, agentName(r));
     }
     return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [recordings]);
@@ -77,7 +83,9 @@ export default function RecordingsPage() {
       // meaning "no lower/upper limit" independently of the other.
       if (dateFrom && r.recordedDateEastern < dateFrom) return false;
       if (dateTo && r.recordedDateEastern > dateTo) return false;
-      if (term && !r.sanitizedName.includes(term) && !r.agentId.includes(term)) return false;
+      if (term && !agentName(r).toLowerCase().includes(term) && !r.sanitizedName.includes(term) && !r.agentId.includes(term)) {
+        return false;
+      }
       return true;
     });
   }, [recordings, search, agentFilter, dateFrom, dateTo]);
@@ -117,7 +125,7 @@ export default function RecordingsPage() {
           >
             <option value="">All Agents</option>
             {agentOptions.map(([id, name]) => (
-              <option key={id} value={id} style={{ textTransform: 'capitalize' }}>{name} ({id})</option>
+              <option key={id} value={id}>{name} ({id})</option>
             ))}
           </select>
 
@@ -170,7 +178,7 @@ export default function RecordingsPage() {
             ) : (
               filtered.map((r) => (
                 <tr key={r.key}>
-                  <td style={{ textTransform: 'capitalize' }}>{r.sanitizedName}</td>
+                  <td style={r.displayName ? undefined : { textTransform: 'capitalize' }}>{agentName(r)}</td>
                   <td>{r.agentId}</td>
                   <td>{formatEastern(r.recordedAt)}</td>
                   <td>{formatSize(r.sizeBytes)}</td>

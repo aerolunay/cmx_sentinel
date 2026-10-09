@@ -21,7 +21,7 @@ export default function RecordingPlaybackModal({ recording, onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box modal-box-wide" onClick={(e) => e.stopPropagation()}>
-        <h2>{recording.sanitizedName} &middot; {recording.agentId}</h2>
+        <h2>{recording.displayName || recording.sanitizedName} &middot; {recording.agentId}</h2>
         <p style={{ fontSize: 13, color: '#666', marginTop: -12 }}>
           {new Date(recording.recordedAt).toLocaleString()}
         </p>
