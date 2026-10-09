@@ -302,6 +302,35 @@ router.get("/session/subscribe", async (req, res) => {
     return res.status(400).json({ error: "agentId and machineName are required." });
   }
 
+  // The ownership registry is in-memory, so after a backend restart it's
+  // empty and every logged-in machine reconnects here with no claim on
+  // record. Rejecting those would force-logout every agent on every
+  // deploy. Instead, re-adopt the machine as owner when the database
+  // agrees: its open aux_events row is on this machine (claim() always
+  // closes other machines' open rows), or there's no open row at all.
+  // Only an open row on a DIFFERENT machine means it really was
+  // superseded.
+  if (!sessionOwnership.hasOwner(agentId)) {
+    try {
+      const [openRows] = await db.query(
+        `SELECT machine_name FROM aux_events
+         WHERE agent_id = ? AND ended_at_utc IS NULL
+         ORDER BY started_at_utc DESC LIMIT 1`,
+        [agentId]
+      );
+      const openMachine = openRows[0]?.machine_name;
+      if (!openMachine || openMachine === machineName) {
+        sessionOwnership.claim(agentId, machineName);
+        console.warn(`Re-adopted agent ${agentId}'s session on ${machineName} after the ownership registry was reset.`);
+      }
+    } catch (err) {
+      // Fail open, same as the desktop side does for connection
+      // problems - a DB hiccup shouldn't log a working agent out.
+      console.error(`Error checking session re-adoption for agent ${agentId}:`, err);
+      sessionOwnership.claim(agentId, machineName);
+    }
+  }
+
   const attached = sessionOwnership.attachConnection(agentId, machineName, res);
   if (!attached) {
     // This machine claimed ownership, then got evicted by yet another

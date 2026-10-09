@@ -104,4 +104,13 @@ function release(agentId, machineName) {
   }
 }
 
-module.exports = { claim, attachConnection, detachConnection, release };
+/**
+ * Whether any machine currently owns `agentId`'s session in this
+ * process. False for every agent right after a backend restart - see
+ * /session/subscribe in desktopSyncRoutes.js for how that's handled.
+ */
+function hasOwner(agentId) {
+  return entries.has(agentId);
+}
+
+module.exports = { claim, attachConnection, detachConnection, release, hasOwner };
