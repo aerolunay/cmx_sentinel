@@ -32,6 +32,15 @@ router.post("/", requireInternalApiKey, async (req, res) => {
       [agentId, groupId, domain, path || "/", blockedAt]
     );
 
+    // VIOLATION_ALERT_EMAILS=false in .env turns the emails off - the
+    // violation is still logged above and listed on the Violations page.
+    // Every alert goes to every admin, so this is the quickest way to
+    // stop burning the shared SES quota (OTP and temp-password emails
+    // use it too).
+    if (process.env.VIOLATION_ALERT_EMAILS === "false") {
+      return res.status(201).json({ logged: true });
+    }
+
     // Email everyone who can currently see/manage restrictions - Admin
     // and Super Admin. Best-effort: a failed email should never make
     // this endpoint report failure back to the desktop service, since
