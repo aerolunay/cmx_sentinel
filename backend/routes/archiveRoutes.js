@@ -2,11 +2,11 @@
 
 const crypto = require("crypto");
 const express = require("express");
-const { GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } = require("@aws-sdk/client-s3");
+const { GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { s3, BUCKET_NAME } = require("../config/s3");
 const db = require("../config/db");
-const { parseRecordingKey } = require("./recordingRoutes");
+const { parseRecordingKey, listAllRecordingObjects } = require("./recordingRoutes");
 
 const router = express.Router();
 
@@ -87,13 +87,14 @@ router.get("/eligible", requireSecret, async (req, res) => {
       return res.status(400).json({ success: false, message: "olderThanDate query param is required (YYYY-MM-DD)." });
     }
 
-    const command = new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: "recordings/", MaxKeys: 1000 });
-    const result = await s3.send(command);
+    // All of them, not just the first 1000 alphabetically - see
+    // listAllRecordingObjects in recordingRoutes.js.
+    const allObjects = await listAllRecordingObjects();
 
     const [alreadyArchivedRows] = await db.query("SELECT recording_key FROM archived_recordings");
     const alreadyArchived = new Set(alreadyArchivedRows.map((r) => r.recording_key));
 
-    const eligible = (result.Contents || [])
+    const eligible = allObjects
       .map((obj) => {
         const parsed = parseRecordingKey(obj.Key);
         if (!parsed) return null;
