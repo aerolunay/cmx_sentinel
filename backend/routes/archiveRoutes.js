@@ -87,14 +87,15 @@ router.get("/eligible", requireSecret, async (req, res) => {
       return res.status(400).json({ success: false, message: "olderThanDate query param is required (YYYY-MM-DD)." });
     }
 
-    // All of them, not just the first 1000 alphabetically - see
-    // listAllRecordingObjects in recordingRoutes.js.
-    const allObjects = await listAllRecordingObjects();
+    // Full listing (not cached) - a single call stopped at the first
+    // 1000 keys alphabetically, so most agents' recordings were never
+    // offered for archiving.
+    const objects = await listAllRecordingObjects();
 
     const [alreadyArchivedRows] = await db.query("SELECT recording_key FROM archived_recordings");
     const alreadyArchived = new Set(alreadyArchivedRows.map((r) => r.recording_key));
 
-    const eligible = allObjects
+    const eligible = objects
       .map((obj) => {
         const parsed = parseRecordingKey(obj.Key);
         if (!parsed) return null;

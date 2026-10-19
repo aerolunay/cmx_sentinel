@@ -50,13 +50,20 @@ export default function RecordingsPage() {
   const [playingRecording, setPlayingRecording] = useState(null);
   const [downloadingKey, setDownloadingKey] = useState(null);
 
+  // Reloaded whenever the date range changes - the server only returns
+  // recordings inside it (the full bucket is far too many files to send
+  // to the browser).
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
     api
-      .listRecordings()
-      .then(setRecordings)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+      .listRecordings({ dateFrom, dateTo })
+      .then((data) => { if (!cancelled) setRecordings(data); })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [dateFrom, dateTo]);
 
   // Derived from whatever recordings are actually loaded, rather than
   // a separate agents API call - Recordings is open to all four web

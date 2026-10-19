@@ -62,7 +62,12 @@ export const api = {
     return data;
   },
 
-  listRecordings: () => request('/api/recordings'),
+  // dateFrom/dateTo (YYYY-MM-DD, Eastern) are optional - empty ones are
+  // left off so the backend doesn't filter that end.
+  listRecordings: (params = {}) => {
+    const defined = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+    return request(`/api/recordings?${new URLSearchParams(defined)}`);
+  },
   getRecordingUrl: (key) => request(`/api/recordings/url?key=${encodeURIComponent(key)}`),
   // super_admin only (enforced server-side too) - returns a presigned
   // URL that prompts an actual file save rather than playing inline.

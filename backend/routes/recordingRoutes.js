@@ -58,42 +58,75 @@ function parseRecordingKey(key) {
   };
 }
 
-// Every object under recordings/. S3 returns at most 1000 keys per
-// ListObjectsV2 call, in ALPHABETICAL key order - and keys start with
-// the agent's sanitized name - so the single call this replaced only
-// ever saw the first ~1000 files: the agents early in the alphabet.
-// Everyone else's recordings were in S3 but never listed. Pages through
-// with the continuation token until S3 says there's nothing more.
+// Every object under recordings/. S3 returns at most 1000 keys per call
+// and in ALPHABETICAL order - and keys start with the agent's name - so
+// a single call only ever covered the first dozen-or-so agents (10-min
+// chunks x ~70 agents is thousands of files a day). This follows
+// ContinuationToken until the listing is complete.
 async function listAllRecordingObjects() {
   const objects = [];
   let continuationToken;
   do {
-    const result = await s3.send(
-      new ListObjectsV2Command({
-        Bucket: BUCKET_NAME,
-        Prefix: "recordings/",
-        ContinuationToken: continuationToken,
-      })
-    );
+    const result = await s3.send(new ListObjectsV2Command({
+      Bucket: BUCKET_NAME,
+      Prefix: "recordings/",
+      MaxKeys: 1000,
+      ContinuationToken: continuationToken,
+    }));
     objects.push(...(result.Contents || []));
     continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
   } while (continuationToken);
   return objects;
 }
 
+// The Recordings page polls this on every load/date change and a full
+// listing is one S3 call per 1000 files, so reuse it briefly rather
+// than relisting the whole bucket for each viewer. New recordings show
+// up within this window.
+const LISTING_CACHE_MS = 60 * 1000;
+let listingCache = { at: 0, objects: null, pending: null };
+
+async function getRecordingObjectsCached() {
+  if (listingCache.objects && Date.now() - listingCache.at < LISTING_CACHE_MS) {
+    return listingCache.objects;
+  }
+  // Share one in-flight listing between concurrent requests.
+  if (!listingCache.pending) {
+    listingCache.pending = listAllRecordingObjects()
+      .then((objects) => {
+        listingCache = { at: Date.now(), objects, pending: null };
+        return objects;
+      })
+      .catch((err) => {
+        listingCache.pending = null;
+        throw err;
+      });
+  }
+  return listingCache.pending;
+}
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 router.get("/", async (req, res) => {
+  // Optional Eastern-date range (YYYY-MM-DD, either end may be omitted)
+  // so the page only receives the days it's showing, not every file in
+  // the bucket.
+  const dateFrom = DATE_PATTERN.test(req.query.dateFrom || "") ? req.query.dateFrom : null;
+  const dateTo = DATE_PATTERN.test(req.query.dateTo || "") ? req.query.dateTo : null;
+  const inRange = (r) =>
+    (!dateFrom || r.recordedDateEastern >= dateFrom) && (!dateTo || r.recordedDateEastern <= dateTo);
+
   try {
-    // NOTE: lists and parses EVERY recording in the bucket on each
-    // request (one S3 call per 1000 files). If that gets slow as
-    // volume grows, record each upload in the database and list from
-    // there by date range instead.
-    const liveRecordings = (await listAllRecordingObjects())
+    const objects = await getRecordingObjectsCached();
+
+    const liveRecordings = objects
       .map((obj) => {
         const parsed = parseRecordingKey(obj.Key);
         if (!parsed) return null;
         return { ...parsed, sizeBytes: obj.Size, isArchived: false, archivedAt: null };
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter(inRange);
 
     // Recordings the local archival script has already moved off S3 -
     // still shown as a row (with isArchived: true instead of a working
@@ -120,7 +153,7 @@ router.get("/", async (req, res) => {
         isArchived: true,
         archivedAt: row.archived_at,
       };
-    });
+    }).filter(inRange);
 
     // Recordings come from S3 filenames, not a DB query - so the
     // agent's full name and group come from cross-referencing the
@@ -247,4 +280,6 @@ module.exports = router;
 // from a recording key the exact same way - see that file's header
 // comment.
 module.exports.parseRecordingKey = parseRecordingKey;
+// Same for the full (paginated) S3 listing - the archive script must see
+// every recording too, not just the first 1000 alphabetically.
 module.exports.listAllRecordingObjects = listAllRecordingObjects;
