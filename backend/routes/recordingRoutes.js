@@ -58,21 +58,36 @@ function parseRecordingKey(key) {
   };
 }
 
+// Every object under recordings/. S3 returns at most 1000 keys per
+// ListObjectsV2 call, in ALPHABETICAL key order - and keys start with
+// the agent's sanitized name - so the single call this replaced only
+// ever saw the first ~1000 files: the agents early in the alphabet.
+// Everyone else's recordings were in S3 but never listed. Pages through
+// with the continuation token until S3 says there's nothing more.
+async function listAllRecordingObjects() {
+  const objects = [];
+  let continuationToken;
+  do {
+    const result = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        Prefix: "recordings/",
+        ContinuationToken: continuationToken,
+      })
+    );
+    objects.push(...(result.Contents || []));
+    continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return objects;
+}
+
 router.get("/", async (req, res) => {
   try {
-    // NOTE: lists up to 1000 objects (S3's per-call max) and parses
-    // all of them - fine for now, but if recording volume grows large
-    // enough that this becomes slow, this is the point to add
-    // pagination or server-side filtering (e.g. by date range) instead
-    // of listing everything on every request.
-    const command = new ListObjectsV2Command({
-      Bucket: BUCKET_NAME,
-      Prefix: "recordings/",
-      MaxKeys: 1000,
-    });
-    const result = await s3.send(command);
-
-    const liveRecordings = (result.Contents || [])
+    // NOTE: lists and parses EVERY recording in the bucket on each
+    // request (one S3 call per 1000 files). If that gets slow as
+    // volume grows, record each upload in the database and list from
+    // there by date range instead.
+    const liveRecordings = (await listAllRecordingObjects())
       .map((obj) => {
         const parsed = parseRecordingKey(obj.Key);
         if (!parsed) return null;
@@ -232,3 +247,4 @@ module.exports = router;
 // from a recording key the exact same way - see that file's header
 // comment.
 module.exports.parseRecordingKey = parseRecordingKey;
+module.exports.listAllRecordingObjects = listAllRecordingObjects;
