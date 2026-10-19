@@ -98,8 +98,9 @@ function MassUploadTab() {
 
       <h3 style={{ marginTop: 28 }}>2. Upload the filled-in file</h3>
       <p style={{ color: '#666', fontSize: 13 }}>
-        Re-uploading a file you've already loaded is safe - matching rows (same Agent ID, Shift Date and
-        Shift Type) just update in place rather than duplicating.
+        Uploading replaces schedules: for every agent and date in the file, that agent's existing shifts on
+        that date are removed and replaced with the uploaded ones. Agents and dates not in the file are left
+        as they are. If a row has a problem, that agent's whole day is skipped and keeps its current schedule.
       </p>
       <input
         type="file"
@@ -117,7 +118,8 @@ function MassUploadTab() {
       {result && (
         <div style={{ marginTop: 20 }}>
           <div className="message">
-            Saved {result.savedRows} of {result.totalRows} row(s).
+            Saved {result.savedRows} of {result.totalRows} row(s)
+            {result.replacedRows > 0 ? `, replacing ${result.replacedRows} existing shift(s)` : ''}.
             {result.errors.length > 0 && ` ${result.errors.length} row(s) had problems - see below.`}
           </div>
           {result.errors.length > 0 && (

@@ -300,15 +300,20 @@ router.delete("/:scheduleId", async (req, res) => {
 // informational only for whoever fills the sheet in, never used for
 // lookup or validation).
 //
-// Every row is validated and upserted INDEPENDENTLY - one bad row
-// (typo'd Agent ID, bad date) is reported as an error for that row
-// number but does NOT block the other valid rows in the same file.
-// This is a deliberate choice: a 200-row schedule shouldn't fail
-// entirely over one mistake, and the per-row error list tells you
-// exactly what to fix and re-upload. Re-uploading the same file after
-// fixing just the bad rows is safe - every row upserts on
-// (agent_id, shift_date, shift_type), so already-loaded valid rows
-// simply update in place with the same values.
+// The upload REPLACES schedules: for every (agent, shift date) that
+// appears in the file, all of that agent's existing shifts on that
+// date are deleted and the uploaded ones saved instead - so a day that
+// used to be Regular + OT and is now uploaded as just Regular loses
+// the old OT row rather than keeping it (which would inflate scheduled
+// hours and skew adherence). Agents/dates not in the file are left
+// alone. Delete + insert run in one transaction.
+//
+// Rows are validated independently - one bad row (typo'd Agent ID, bad
+// date) is reported for that row number without blocking the rest of
+// the file. The exception is the bad row's own day: if any row for an
+// (agent, date) has a problem, NONE of that day's rows are saved and
+// its existing schedule is kept, so a typo can't wipe out a shift.
+// Re-uploading after fixing is safe - the day is simply replaced again.
 router.post("/bulk-upload", upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded." });
@@ -341,7 +346,8 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
   }
 
   const errors = [];
-  const validRows = [];
+  const validRows = []; // { rowNum, dayKey, values: [agentId, shiftDate, shiftType, start, end] }
+  const daysWithErrors = new Set(); // "agentId|shiftDate" of any row that failed validation
 
   records.forEach((record, index) => {
     const rowNum = index + 2; // +1 for 0-index, +1 for the header row - matches what the person sees in Excel/Sheets
@@ -350,6 +356,7 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
     const shiftType = (record["Shift Type"] || "").trim();
     const startTime = (record["Start Time"] || "").trim();
     const endTime = (record["End Time"] || "").trim();
+    const dayKey = `${agentId}|${shiftDate}`;
 
     if (!agentId) {
       errors.push({ row: rowNum, message: "Agent ID is blank." });
@@ -362,39 +369,77 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
     const validationError = validateShiftFields({ shiftDate, shiftType, startTime, endTime });
     if (validationError) {
       errors.push({ row: rowNum, message: validationError });
+      if (shiftDate) daysWithErrors.add(dayKey);
       return;
     }
 
     const { scheduledStart, scheduledEnd } = buildShiftWindow(shiftDate, startTime, endTime);
-    validRows.push([agentId, shiftDate, shiftType, scheduledStart, scheduledEnd]);
+    validRows.push({ rowNum, dayKey, values: [agentId, shiftDate, shiftType, scheduledStart, scheduledEnd] });
   });
 
-  let upsertedCount = 0;
-  if (validRows.length > 0) {
+  // A day with any bad row is skipped entirely (see the comment above).
+  const rowsToSave = [];
+  for (const row of validRows) {
+    if (daysWithErrors.has(row.dayKey)) {
+      const [agentId, shiftDate] = row.values;
+      errors.push({
+        row: row.rowNum,
+        message: `Not saved - another row for agent ${agentId} on ${shiftDate} has a problem. ` +
+          "Fix it and re-upload; that day's existing schedule was left unchanged.",
+      });
+    } else {
+      rowsToSave.push(row.values);
+    }
+  }
+  errors.sort((a, b) => a.row - b.row);
+
+  let savedCount = 0;
+  let replacedCount = 0;
+  if (rowsToSave.length > 0) {
+    const days = [...new Map(rowsToSave.map(([agentId, shiftDate]) => [`${agentId}|${shiftDate}`, [agentId, shiftDate]])).values()];
+    const conn = await db.getConnection();
     try {
-      const [result] = await db.query(
+      await conn.beginTransaction();
+
+      // Clear every uploaded (agent, date) first, in chunks to keep the
+      // parameter list reasonable on a 5000-row file.
+      const DELETE_CHUNK = 500;
+      for (let i = 0; i < days.length; i += DELETE_CHUNK) {
+        const chunk = days.slice(i, i + DELETE_CHUNK);
+        const [del] = await conn.query(
+          `DELETE FROM agent_schedules WHERE (agent_id, shift_date) IN (${chunk.map(() => "(?, ?)").join(",")})`,
+          chunk.flat()
+        );
+        replacedCount += del.affectedRows;
+      }
+
+      // ON DUPLICATE KEY UPDATE only matters if the file itself lists
+      // the same agent/date/shift type twice - the later row wins.
+      await conn.query(
         `INSERT INTO agent_schedules (agent_id, shift_date, shift_type, scheduled_start, scheduled_end)
          VALUES ?
          ON DUPLICATE KEY UPDATE
            scheduled_start = VALUES(scheduled_start),
            scheduled_end = VALUES(scheduled_end)`,
-        [validRows]
+        [rowsToSave]
       );
-      // affectedRows counts an unchanged-values upsert as 1 and an
-      // actually-changed one as 2 (MySQL's own convention for
-      // ON DUPLICATE KEY UPDATE) - not a meaningful "how many rows"
-      // figure, so we report the row count we attempted instead.
-      upsertedCount = validRows.length;
+
+      await conn.commit();
+      savedCount = rowsToSave.length;
     } catch (err) {
-      console.error("Error bulk-upserting schedules:", err);
-      return res.status(500).json({ error: "A server error occurred while saving the valid rows." });
+      await conn.rollback().catch(() => {});
+      console.error("Error bulk-replacing schedules:", err);
+      return res.status(500).json({ error: "A server error occurred while saving the schedule. Nothing was changed." });
+    } finally {
+      conn.release();
     }
   }
 
   await logAction(req, "bulk_upload", "agent_schedule", "bulk",
-    `Bulk schedule upload: ${upsertedCount} row(s) saved, ${errors.length} error(s), from a ${records.length}-row file.`);
+    `Bulk schedule upload: ${savedCount} row(s) saved, replacing ${replacedCount} existing row(s); ` +
+    `${errors.length} error(s), from a ${records.length}-row file.`);
 
-  res.json({ totalRows: records.length, savedRows: upsertedCount, errors });
+  res.json({ totalRows: records.length, savedRows: savedCount, replacedRows: replacedCount, errors });
 });
 
 module.exports = router;
