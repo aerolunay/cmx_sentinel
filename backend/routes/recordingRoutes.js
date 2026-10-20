@@ -19,8 +19,23 @@ router.use(requireAuth);
 // Matches the desktop service's own naming convention exactly (see
 // S3UploadService.cs): sanitizedDisplayName_agentId_yyMMddHHmmss.mp4
 // The timestamp is ALREADY Eastern time as embedded by the desktop
-// service (EasternTime.ConvertFromUtc).
-const FILENAME_PATTERN = /^([a-z0-9]+)_(\d+)_(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.mp4$/;
+// service (EasternTime.ConvertFromUtc). The name part is any Unicode
+// letters/digits, not just a-z: the desktop keeps accented letters
+// (char.IsLetterOrDigit), e.g. "alleyaacuña", and an ASCII-only pattern
+// silently dropped those agents' recordings.
+const FILENAME_PATTERN = /^([\p{L}\p{N}]+)_(\d+)_(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.mp4$/u;
+
+// Same rule as S3UploadService.cs uses to build the key from the agent's
+// display name: keep letters/digits, lowercase. "Alleya Acuña" ->
+// "alleyaacuña". Lets us rebuild an agent's key prefix from the agents
+// table. (A recording made before an agent was renamed keeps the old
+// name in its key, so a date lookup by the new name won't find it.)
+function sanitizeDisplayName(displayName) {
+  return Array.from(displayName || "")
+    .filter((ch) => /[\p{L}\p{Nd}]/u.test(ch))
+    .join("")
+    .toLowerCase();
+}
 
 function parseRecordingKey(key) {
   const fileName = key.split("/").pop();
@@ -63,13 +78,13 @@ function parseRecordingKey(key) {
 // a single call only ever covered the first dozen-or-so agents (10-min
 // chunks x ~70 agents is thousands of files a day). This follows
 // ContinuationToken until the listing is complete.
-async function listAllRecordingObjects() {
+async function listObjectsWithPrefix(prefix) {
   const objects = [];
   let continuationToken;
   do {
     const result = await s3.send(new ListObjectsV2Command({
       Bucket: BUCKET_NAME,
-      Prefix: "recordings/",
+      Prefix: prefix,
       MaxKeys: 1000,
       ContinuationToken: continuationToken,
     }));
@@ -77,6 +92,59 @@ async function listAllRecordingObjects() {
     continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
   } while (continuationToken);
   return objects;
+}
+
+function listAllRecordingObjects() {
+  return listObjectsWithPrefix("recordings/");
+}
+
+// Runs async tasks with at most `limit` in flight at once.
+async function runWithConcurrency(tasks, limit) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  async function worker() {
+    while (next < tasks.length) {
+      const i = next++;
+      results[i] = await tasks[i]();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
+// Date-scoped lookup: keys are recordings/{name}_{agentId}_{yyMMddHHmmss}.mp4,
+// so "{name}_{agentId}_{yyMMdd}" is an exact S3 prefix for one agent's
+// recordings on one Eastern day. One small call per agent per day (run
+// in parallel) instead of listing the whole bucket - which was ~13k
+// files and ~7s on 2026-10-20, and grows every day.
+const MAX_DAYS_PER_LOOKUP = 62;
+const S3_LOOKUP_CONCURRENCY = 16;
+
+function eachDay(dateFrom, dateTo) {
+  const days = [];
+  let d = DateTime.fromISO(dateFrom, { zone: "utc" });
+  const end = DateTime.fromISO(dateTo, { zone: "utc" });
+  while (d <= end && days.length <= MAX_DAYS_PER_LOOKUP) {
+    days.push(d);
+    d = d.plus({ days: 1 });
+  }
+  return days;
+}
+
+async function listRecordingObjectsForDays(agentRows, days) {
+  const prefixes = new Set();
+  for (const agent of agentRows) {
+    const name = sanitizeDisplayName(agent.display_name);
+    if (!name) continue;
+    for (const day of days) {
+      prefixes.add(`recordings/${name}_${agent.agent_id}_${day.toFormat("yyMMdd")}`);
+    }
+  }
+  const results = await runWithConcurrency(
+    [...prefixes].map((prefix) => () => listObjectsWithPrefix(prefix)),
+    S3_LOOKUP_CONCURRENCY
+  );
+  return results.flat();
 }
 
 // The Recordings page polls this on every load/date change and a full
@@ -107,17 +175,61 @@ async function getRecordingObjectsCached() {
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+// Agent picker for the Recordings page - straight from the agents
+// table (no S3), so every agent is listed whether or not they have
+// recordings yet. /api/agents is admin-only, which is why Recordings
+// (open to every web role) has its own. Supervisors only get agents in
+// their assigned groups.
+router.get("/agents", async (req, res) => {
+  try {
+    const scopedGroupIds = await getScopedGroupIds(req);
+    if (scopedGroupIds !== null && scopedGroupIds.length === 0) {
+      return res.json([]);
+    }
+    const [rows] = await db.query(
+      "SELECT agent_id, display_name, group_id FROM agents ORDER BY display_name ASC"
+    );
+    const visible = scopedGroupIds === null ? rows : rows.filter((a) => scopedGroupIds.includes(a.group_id));
+    res.json(visible.map((a) => ({ agentId: String(a.agent_id), displayName: a.display_name })));
+  } catch (err) {
+    console.error("Error listing recording agents:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
 router.get("/", async (req, res) => {
-  // Optional Eastern-date range (YYYY-MM-DD, either end may be omitted)
-  // so the page only receives the days it's showing, not every file in
-  // the bucket.
+  // Eastern-date range (YYYY-MM-DD) and optional agentId. The page
+  // always sends both dates (and only calls this when Search is
+  // clicked); either end may still be omitted by other callers.
   const dateFrom = DATE_PATTERN.test(req.query.dateFrom || "") ? req.query.dateFrom : null;
   const dateTo = DATE_PATTERN.test(req.query.dateTo || "") ? req.query.dateTo : null;
+  const agentId = req.query.agentId ? String(req.query.agentId) : null;
   const inRange = (r) =>
     (!dateFrom || r.recordedDateEastern >= dateFrom) && (!dateTo || r.recordedDateEastern <= dateTo);
+  const matchesAgent = (r) => !agentId || String(r.agentId) === agentId;
 
   try {
-    const objects = await getRecordingObjectsCached();
+    const scopedGroupIds = await getScopedGroupIds(req);
+    if (scopedGroupIds !== null && scopedGroupIds.length === 0) {
+      return res.json([]);
+    }
+
+    const [agentRows] = await db.query("SELECT agent_id, display_name, group_id FROM agents");
+    const agentsById = new Map(agentRows.map((a) => [String(a.agent_id), a]));
+
+    // With a full date range (the page always sends one unless the
+    // dates are cleared), look up just those days per agent. Otherwise
+    // fall back to listing the whole bucket.
+    const days = dateFrom && dateTo && dateFrom <= dateTo ? eachDay(dateFrom, dateTo) : null;
+    let objects;
+    if (days && days.length <= MAX_DAYS_PER_LOOKUP) {
+      const agentsToQuery = agentRows.filter((a) =>
+        (!agentId || String(a.agent_id) === agentId) &&
+        (scopedGroupIds === null || scopedGroupIds.includes(a.group_id)));
+      objects = await listRecordingObjectsForDays(agentsToQuery, days);
+    } else {
+      objects = await getRecordingObjectsCached();
+    }
 
     const liveRecordings = objects
       .map((obj) => {
@@ -126,7 +238,8 @@ router.get("/", async (req, res) => {
         return { ...parsed, sizeBytes: obj.Size, isArchived: false, archivedAt: null };
       })
       .filter(Boolean)
-      .filter(inRange);
+      .filter(inRange)
+      .filter(matchesAgent);
 
     // Recordings the local archival script has already moved off S3 -
     // still shown as a row (with isArchived: true instead of a working
@@ -153,26 +266,18 @@ router.get("/", async (req, res) => {
         isArchived: true,
         archivedAt: row.archived_at,
       };
-    }).filter(inRange);
+    }).filter(inRange).filter(matchesAgent);
 
     // Recordings come from S3 filenames, not a DB query - so the
     // agent's full name and group come from cross-referencing the
-    // parsed agentId against the agents table here, unlike
-    // reportRoutes.js where a JOIN does this as part of the query.
+    // parsed agentId against the agents table (agentsById, above).
     // displayName is null for an agent ID that's no longer in the
     // table; the frontend falls back to the filename's sanitizedName.
-    const [agentRows] = await db.query("SELECT agent_id, display_name, group_id FROM agents");
-    const agentsById = new Map(agentRows.map((a) => [String(a.agent_id), a]));
-
     const recordings = [...liveRecordings, ...archivedRecordings]
       .map((r) => ({ ...r, displayName: agentsById.get(String(r.agentId))?.display_name ?? null }))
       .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt));
 
-    const scopedGroupIds = await getScopedGroupIds(req);
     if (scopedGroupIds !== null) {
-      if (scopedGroupIds.length === 0) {
-        return res.json([]);
-      }
       const allowed = recordings.filter((r) => scopedGroupIds.includes(agentsById.get(String(r.agentId))?.group_id));
       return res.json(allowed);
     }

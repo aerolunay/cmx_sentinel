@@ -62,8 +62,9 @@ export const api = {
     return data;
   },
 
-  // dateFrom/dateTo (YYYY-MM-DD, Eastern) are optional - empty ones are
-  // left off so the backend doesn't filter that end.
+  listRecordingAgents: () => request('/api/recordings/agents'),
+  // dateFrom/dateTo (YYYY-MM-DD, Eastern) and agentId - empty ones are
+  // left off so the backend doesn't filter on them.
   listRecordings: (params = {}) => {
     const defined = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
     return request(`/api/recordings?${new URLSearchParams(defined)}`);

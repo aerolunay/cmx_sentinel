@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import RecordingPlaybackModal from '../modals/RecordingPlaybackModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -37,69 +37,71 @@ function formatEastern(isoString) {
   }).format(new Date(isoString));
 }
 
+const ALL_AGENTS = '__all__';
+// Each search is one S3 lookup per agent per day (see
+// MAX_DAYS_PER_LOOKUP in recordingRoutes.js), so "All agents" (~85
+// lookups a day, ~1,000+ files a day) gets a much shorter limit than a
+// single agent.
+const MAX_RANGE_DAYS = 62;
+const MAX_RANGE_DAYS_ALL_AGENTS = 7;
+
+// Inclusive day count between two YYYY-MM-DD dates.
+function daysBetween(from, to) {
+  const toUtc = (dateStr) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  return Math.round((toUtc(to) - toUtc(from)) / 86400000) + 1;
+}
+
 export default function RecordingsPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
-  const [recordings, setRecordings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [agentFilter, setAgentFilter] = useState('');
+  const [agents, setAgents] = useState([]);
+  const [agentChoice, setAgentChoice] = useState(''); // '' = not chosen yet, ALL_AGENTS, or an agent ID
   const [dateFrom, setDateFrom] = useState(getTodayEastern());
   const [dateTo, setDateTo] = useState(getTodayEastern());
+  const [recordings, setRecordings] = useState([]);
+  const [searched, setSearched] = useState(null); // what the shown results are for
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [playingRecording, setPlayingRecording] = useState(null);
   const [downloadingKey, setDownloadingKey] = useState(null);
 
-  // Reloaded whenever the date range changes - the server only returns
-  // recordings inside it (the full bucket is far too many files to send
-  // to the browser).
+  // Only the agent list loads automatically (from the database, not S3).
+  // Recordings are fetched from S3 only when Search is clicked.
   useEffect(() => {
-    let cancelled = false;
+    api.listRecordingAgents()
+      .then(setAgents)
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const maxDays = agentChoice === ALL_AGENTS ? MAX_RANGE_DAYS_ALL_AGENTS : MAX_RANGE_DAYS;
+  const rangeProblem = !dateFrom || !dateTo
+    ? 'Choose a From and To date.'
+    : dateFrom > dateTo
+      ? 'From must be on or before To.'
+      : daysBetween(dateFrom, dateTo) > maxDays
+        ? `Choose a range of ${maxDays} days or less${agentChoice === ALL_AGENTS ? ' for All agents' : ''}.`
+        : '';
+  const canSearch = Boolean(agentChoice) && !rangeProblem && !loading;
+
+  async function handleSearch(e) {
+    e.preventDefault();
+    if (!canSearch) return;
     setLoading(true);
     setError('');
-    api
-      .listRecordings({ dateFrom, dateTo })
-      .then((data) => { if (!cancelled) setRecordings(data); })
-      .catch((err) => { if (!cancelled) setError(err.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [dateFrom, dateTo]);
-
-  // Derived from whatever recordings are actually loaded, rather than
-  // a separate agents API call - Recordings is open to all four web
-  // roles, but /api/agents is admin-only, so this avoids a permissions
-  // mismatch while still giving a real, accurate dropdown.
-  const agentOptions = useMemo(() => {
-    const seen = new Map();
-    for (const r of recordings) {
-      if (!seen.has(r.agentId)) seen.set(r.agentId, agentName(r));
+    try {
+      const agentId = agentChoice === ALL_AGENTS ? '' : agentChoice;
+      const data = await api.listRecordings({ agentId, dateFrom, dateTo });
+      setRecordings(data);
+      const agent = agents.find((a) => a.agentId === agentChoice);
+      setSearched({ label: agent ? agent.displayName : 'All agents', dateFrom, dateTo });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [recordings]);
-
-  // Client-side filter for now - fine at current volume, see
-  // recordingRoutes.js's comment about revisiting this if the list
-  // grows large enough to need server-side filtering instead.
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return recordings.filter((r) => {
-      if (agentFilter && r.agentId !== agentFilter) return false;
-      // String comparison works correctly here since recordedDateEastern
-      // is always YYYY-MM-DD (zero-padded ISO format) - lexicographic
-      // order matches chronological order. Either bound can be empty,
-      // meaning "no lower/upper limit" independently of the other.
-      if (dateFrom && r.recordedDateEastern < dateFrom) return false;
-      if (dateTo && r.recordedDateEastern > dateTo) return false;
-      if (term && !agentName(r).toLowerCase().includes(term) && !r.sanitizedName.includes(term) && !r.agentId.includes(term)) {
-        return false;
-      }
-      return true;
-    });
-  }, [recordings, search, agentFilter, dateFrom, dateTo]);
-
-  function clearDates() {
-    setDateFrom('');
-    setDateTo('');
   }
 
   async function handleDownload(recording) {
@@ -122,52 +124,60 @@ export default function RecordingsPage() {
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-        <h2 style={{ margin: 0 }}>Recordings</h2>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <select
-            value={agentFilter}
-            onChange={(e) => setAgentFilter(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
-          >
-            <option value="">All Agents</option>
-            {agentOptions.map(([id, name]) => (
-              <option key={id} value={id}>{name} ({id})</option>
-            ))}
-          </select>
+      <h2 style={{ marginTop: 0 }}>Recordings</h2>
 
-          <label style={{ fontSize: 13, color: '#555' }}>From</label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
-          />
-          <label style={{ fontSize: 13, color: '#555' }}>To</label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
-          />
-          {(dateFrom || dateTo) && (
-            <button type="button" className="btn-link" onClick={clearDates}>Clear dates</button>
-          )}
+      <form
+        onSubmit={handleSearch}
+        style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}
+      >
+        <select
+          value={agentChoice}
+          onChange={(e) => setAgentChoice(e.target.value)}
+          style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14, maxWidth: 280 }}
+        >
+          <option value="" disabled>Select agent...</option>
+          <option value={ALL_AGENTS}>All agents</option>
+          {agents.map((a) => (
+            <option key={a.agentId} value={a.agentId}>{a.displayName} ({a.agentId})</option>
+          ))}
+        </select>
 
-          <input
-            type="text"
-            placeholder="Search..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', width: 160, fontSize: 14 }}
-          />
-        </div>
-      </div>
+        <label style={{ fontSize: 13, color: '#555' }}>From</label>
+        <input
+          type="date"
+          value={dateFrom}
+          max={dateTo || undefined}
+          onChange={(e) => setDateFrom(e.target.value)}
+          style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
+        />
+        <label style={{ fontSize: 13, color: '#555' }}>To</label>
+        <input
+          type="date"
+          value={dateTo}
+          min={dateFrom || undefined}
+          onChange={(e) => setDateTo(e.target.value)}
+          style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
+        />
 
+        <button type="submit" className="btn" disabled={!canSearch}>
+          {loading ? 'Searching...' : 'Search'}
+        </button>
+      </form>
+
+      {agentChoice && rangeProblem && <div className="error" style={{ textAlign: 'left' }}>{rangeProblem}</div>}
       {error && <div className="error">{error}</div>}
 
+      {searched && !loading && (
+        <p style={{ fontSize: 13, color: '#666', margin: '0 0 12px' }}>
+          {recordings.length} recording{recordings.length === 1 ? '' : 's'} for <strong>{searched.label}</strong>,{' '}
+          {searched.dateFrom === searched.dateTo ? searched.dateFrom : `${searched.dateFrom} to ${searched.dateTo}`}.
+        </p>
+      )}
+
       {loading ? (
-        <p>Loading...</p>
+        <p>Searching...</p>
+      ) : !searched ? (
+        <p style={{ color: '#666' }}>Select an agent and date range, then click Search.</p>
       ) : (
         <table>
           <thead>
@@ -180,10 +190,10 @@ export default function RecordingsPage() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={5}>No recordings found for this filter.</td></tr>
+            {recordings.length === 0 ? (
+              <tr><td colSpan={5}>No recordings found for this agent and date range.</td></tr>
             ) : (
-              filtered.map((r) => (
+              recordings.map((r) => (
                 <tr key={r.key}>
                   <td style={r.displayName ? undefined : { textTransform: 'capitalize' }}>{agentName(r)}</td>
                   <td>{r.agentId}</td>
