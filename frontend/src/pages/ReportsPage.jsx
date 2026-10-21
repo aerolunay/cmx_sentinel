@@ -120,9 +120,9 @@ function getEfficiencyColor(pct) {
 // "showed up for your shift" is a lower bar that should read as
 // concerning sooner than efficiency does.
 function getAdherenceColor(pct) {
-  if (pct >= 95) return '#1e3a8a'; // dark blue
-  if (pct >= 90) return '#166534'; // dark green
-  if (pct >= 80) return '#c2660a'; // orange
+  if (pct >= 98) return '#1e3a8a'; // dark blue
+  if (pct >= 95) return '#166534'; // dark green
+  if (pct >= 90) return '#c2660a'; // orange
   return '#b91c1c'; // red
 }
 

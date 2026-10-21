@@ -89,10 +89,10 @@ export default function MetricsHelpModal({ onClose }) {
               <tr><th /><th>Productive Hrs</th><th>Adherence</th></tr>
             </thead>
             <tbody>
-              <tr><td><span className="metrics-swatch" style={{ background: '#1e3a8a' }} />Dark blue</td><td>88% +</td><td>95% +</td></tr>
-              <tr><td><span className="metrics-swatch" style={{ background: '#166534' }} />Green</td><td>85 - 87.9%</td><td>90 - 94.9%</td></tr>
-              <tr><td><span className="metrics-swatch" style={{ background: '#c2660a' }} />Orange</td><td>80 - 84.9%</td><td>80 - 89.9%</td></tr>
-              <tr><td><span className="metrics-swatch" style={{ background: '#b91c1c' }} />Red</td><td>below 80%</td><td>below 80%</td></tr>
+              <tr><td><span className="metrics-swatch" style={{ background: '#1e3a8a' }} />Dark blue</td><td>88% +</td><td>98% +</td></tr>
+              <tr><td><span className="metrics-swatch" style={{ background: '#166534' }} />Green</td><td>85 - 87.9%</td><td>95 - 97.99%</td></tr>
+              <tr><td><span className="metrics-swatch" style={{ background: '#c2660a' }} />Orange</td><td>80 - 84.9%</td><td>90 - 94.99%</td></tr>
+              <tr><td><span className="metrics-swatch" style={{ background: '#b91c1c' }} />Red</td><td>below 80%</td><td>below 90%</td></tr>
             </tbody>
           </table>
         </section>
