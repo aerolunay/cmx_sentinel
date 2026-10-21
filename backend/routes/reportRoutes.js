@@ -25,6 +25,10 @@ const PRODUCTIVE_AUX_CODES = ["Production", "Admin", "Adhoc", "Coaching", "Meeti
 const EST_FORMAT = "%Y-%m-%d %H:%i:%s";
 const toMs = (sqlString) => DateTime.fromSQL(sqlString, { zone: "utc" }).toMillis();
 
+// An open aux_events row older than this is treated as a leftover from
+// a crashed/powered-off machine that never logged out, not a live agent.
+const MAX_OPEN_SEGMENT_HOURS = 16;
+
 // Seconds of [start, end) that fall inside any of the given windows.
 function overlapSeconds(startMs, endMs, windows) {
   let total = 0;
@@ -103,6 +107,15 @@ router.get("/efficiency", async (req, res) => {
 
     const filters = { dateFrom, dateTo, agentId, groupId, scopedGroupIds };
 
+    // Everything below is a RUNNING total as of now: the segment an agent
+    // is currently in counts up to now (unless it's a stale leftover - see
+    // MAX_OPEN_SEGMENT_HOURS), and scheduled time only counts once it has
+    // started - the rest of today's shift and any future day's schedule
+    // stay out of the adherence denominator.
+    const now = new Date();
+    const nowEst = toEasternSqlString(now);
+    const openCutoffEst = toEasternSqlString(new Date(now.getTime() - MAX_OPEN_SEGMENT_HOURS * 3600 * 1000));
+
     // Query 1 - LEGACY totals: every completed aux segment in range,
     // regardless of any schedule. This is the fallback used for any
     // agent/day the schedule sync hasn't loaded yet (or never will,
@@ -114,30 +127,33 @@ router.get("/efficiency", async (req, res) => {
       `SELECT a.agent_id, a.display_name, a.group_id, g.group_name,
               DATE_FORMAT(ae.started_at_est, '%Y-%m-%d') AS report_date,
               ae.aux_code,
-              SUM(ae.duration_seconds) AS total_seconds
+              SUM(COALESCE(ae.duration_seconds, GREATEST(0, TIMESTAMPDIFF(SECOND, ae.started_at_est, ?)))) AS total_seconds
        FROM aux_events ae
        JOIN agents a ON a.agent_id = ae.agent_id
        LEFT JOIN agent_groups g ON g.group_id = a.group_id
        WHERE ${legacyFilter.conditions.join(" AND ")}
+         AND (ae.duration_seconds IS NOT NULL OR (ae.ended_at_utc IS NULL AND ae.started_at_est >= ?))
        GROUP BY a.agent_id, a.display_name, a.group_id, g.group_name, DATE_FORMAT(ae.started_at_est, '%Y-%m-%d'), ae.aux_code`,
-      legacyFilter.params
+      [nowEst, ...legacyFilter.params, openCutoffEst]
     );
 
     // Query 2 - total SCHEDULED seconds per (agent, day), summed across
     // every shift_type row that day (e.g. Regular + OT both count
     // toward the same day's scheduled total). This alone is what tells
-    // us whether an (agent, day) HAS a schedule at all.
+    // us whether an (agent, day) HAS a schedule at all. Only the part of
+    // each window that has already started counts (capped at now), so a
+    // future day has a schedule but 0 scheduled seconds so far.
     const scheduleFilter = buildConditions("s.shift_date", filters);
     const [scheduleRows] = await db.query(
       `SELECT a.agent_id, a.display_name, a.group_id, g.group_name,
               DATE_FORMAT(s.shift_date, '%Y-%m-%d') AS report_date,
-              SUM(TIMESTAMPDIFF(SECOND, s.scheduled_start, s.scheduled_end)) AS scheduled_seconds
+              SUM(GREATEST(0, TIMESTAMPDIFF(SECOND, s.scheduled_start, LEAST(s.scheduled_end, ?)))) AS scheduled_seconds
        FROM agent_schedules s
        JOIN agents a ON a.agent_id = s.agent_id
        LEFT JOIN agent_groups g ON g.group_id = a.group_id
        WHERE ${scheduleFilter.conditions.join(" AND ")}
        GROUP BY a.agent_id, a.display_name, a.group_id, g.group_name, DATE_FORMAT(s.shift_date, '%Y-%m-%d')`,
-      scheduleFilter.params
+      [nowEst, ...scheduleFilter.params]
     );
 
     // Query 3 - aux time ACTUALLY WITHIN a scheduled window, per
@@ -146,8 +162,8 @@ router.get("/efficiency", async (req, res) => {
     // midnight still captures aux_events on either side of it
     // correctly; grouped by the SCHEDULE's shift_date, not the aux
     // event's own calendar date, so all of an overnight shift's time
-    // lands under the one day it's dated. Only completed segments
-    // count (ended_at_est IS NOT NULL), same as the legacy query.
+    // lands under the one day it's dated. Completed segments count, plus
+    // a still-open one up to now, same as the legacy query.
     // Overlapping schedule rows for the same agent would double-count
     // here - the sync job is expected to load non-overlapping windows
     // per agent per day (see sql/002_add_agent_schedules.sql).
@@ -160,7 +176,7 @@ router.get("/efficiency", async (req, res) => {
                 TIMESTAMPDIFF(
                   SECOND,
                   GREATEST(ae.started_at_est, s.scheduled_start),
-                  LEAST(ae.ended_at_est, s.scheduled_end)
+                  LEAST(COALESCE(ae.ended_at_est, ?), s.scheduled_end)
                 )
               ) AS overlap_seconds
        FROM agent_schedules s
@@ -168,12 +184,12 @@ router.get("/efficiency", async (req, res) => {
        LEFT JOIN agent_groups g ON g.group_id = a.group_id
        JOIN aux_events ae
          ON ae.agent_id = s.agent_id
-        AND ae.ended_at_est IS NOT NULL
+        AND (ae.ended_at_est IS NOT NULL OR (ae.ended_at_utc IS NULL AND ae.started_at_est >= ?))
         AND ae.started_at_est < s.scheduled_end
-        AND ae.ended_at_est > s.scheduled_start
+        AND COALESCE(ae.ended_at_est, ?) > s.scheduled_start
        WHERE ${overlapFilter.conditions.join(" AND ")}
        GROUP BY a.agent_id, a.display_name, a.group_id, g.group_name, DATE_FORMAT(s.shift_date, '%Y-%m-%d'), ae.aux_code`,
-      overlapFilter.params
+      [nowEst, openCutoffEst, nowEst, ...overlapFilter.params]
     );
 
     // Query 4 + 5 - reconnect gaps (see findLoginGaps). Query 4 lists the
@@ -339,9 +355,71 @@ router.get("/efficiency", async (req, res) => {
   }
 });
 
-// An open aux_events row older than this is treated as a leftover from
-// a crashed/powered-off machine that never logged out, not a live agent.
-const MAX_OPEN_SEGMENT_HOURS = 16;
+// Today's recorded aux time (Eastern day, midnight to now) split into
+// one-hour buckets, per agent so the dashboard can filter by group/agent
+// client-side. All recorded time counts here, schedule or not - it's a
+// picture of what agents were doing each hour. A segment that spans an
+// hour boundary is split across both hours, an overnight one is clipped
+// at midnight, and the open segment counts up to now (stale open rows
+// older than MAX_OPEN_SEGMENT_HOURS are ignored).
+router.get("/hourly-aux", async (req, res) => {
+  try {
+    const scopedGroupIds = await getScopedGroupIds(req);
+    if (scopedGroupIds !== null && scopedGroupIds.length === 0) {
+      return res.json([]);
+    }
+
+    const now = new Date();
+    const nowEst = toEasternSqlString(now);
+    const dayStartEst = `${nowEst.slice(0, 10)} 00:00:00`;
+    const openCutoffEst = toEasternSqlString(new Date(now.getTime() - MAX_OPEN_SEGMENT_HOURS * 3600 * 1000));
+
+    const conditions = [
+      "ae.started_at_est < ?",
+      "(ae.ended_at_est > ? OR (ae.ended_at_utc IS NULL AND ae.started_at_est >= ?))",
+    ];
+    const params = [nowEst, dayStartEst, openCutoffEst];
+    if (scopedGroupIds !== null) {
+      conditions.push(`a.group_id IN (${scopedGroupIds.map(() => "?").join(",")})`);
+      params.push(...scopedGroupIds);
+    }
+
+    const [rows] = await db.query(
+      `SELECT ae.agent_id, a.group_id, ae.aux_code,
+              DATE_FORMAT(ae.started_at_est, '${EST_FORMAT}') AS started_est,
+              DATE_FORMAT(ae.ended_at_est, '${EST_FORMAT}') AS ended_est
+       FROM aux_events ae
+       JOIN agents a ON a.agent_id = ae.agent_id
+       WHERE ${conditions.join(" AND ")}`,
+      params
+    );
+
+    const dayStartMs = toMs(dayStartEst);
+    const nowMs = toMs(nowEst);
+    const HOUR_MS = 3600 * 1000;
+    const buckets = new Map(); // "agentId|hour|auxCode" -> entry
+
+    for (const row of rows) {
+      let startMs = Math.max(toMs(row.started_est), dayStartMs);
+      const endMs = Math.min(row.ended_est ? toMs(row.ended_est) : nowMs, nowMs);
+      while (startMs < endMs) {
+        const hour = Math.floor((startMs - dayStartMs) / HOUR_MS);
+        const sliceEndMs = Math.min(endMs, dayStartMs + (hour + 1) * HOUR_MS);
+        const key = `${row.agent_id}|${hour}|${row.aux_code}`;
+        if (!buckets.has(key)) {
+          buckets.set(key, { agentId: row.agent_id, groupId: row.group_id, hour, auxCode: row.aux_code, seconds: 0 });
+        }
+        buckets.get(key).seconds += (sliceEndMs - startMs) / 1000;
+        startMs = sliceEndMs;
+      }
+    }
+
+    res.json([...buckets.values()].map((b) => ({ ...b, seconds: Math.round(b.seconds) })));
+  } catch (err) {
+    console.error("Error loading hourly aux:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
 
 // Agents currently logged in to the desktop app, with their current aux
 // and live efficiency/adherence for the shift they're on - optionally

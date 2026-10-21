@@ -78,7 +78,7 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
                 <th>Agent</th>
                 <th>Aux</th>
                 <th>Time</th>
-                <th title="Efficiency for the current shift">Eff</th>
+                <th title="Productive Hrs % for the current shift">Prod</th>
                 <th title="Adherence to schedule so far this shift">Adh</th>
               </tr>
             </thead>

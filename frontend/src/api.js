@@ -91,6 +91,7 @@ export const api = {
     request(`/api/groups/${groupId}/restrictions/copy`, { method: 'POST', body: JSON.stringify({ targetGroupId }) }),
 
   getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
+  getHourlyAux: () => request('/api/reports/hourly-aux'),
   listLiveAgents: () => request('/api/reports/live-agents'),
   getLiveAgent: (agentId) => request(`/api/reports/live-agents/${encodeURIComponent(agentId)}`),
 
