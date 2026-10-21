@@ -91,10 +91,15 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
               <div className="live-detail-tile">
                 <div className="live-detail-label">Productive Hrs</div>
                 <div className="live-detail-value" style={agent.efficiencyPct == null ? undefined : { color: getEfficiencyColor(agent.efficiencyPct) }}>
-                  {agent.efficiencyPct == null ? '-' : `${agent.efficiencyPct.toFixed(1)}%`}
+                  {agent.efficiencyPct == null ? 'N/A' : `${agent.efficiencyPct.toFixed(1)}%`}
                 </div>
                 <div className="live-detail-small">
-                  {formatDuration(d.productiveSeconds)} productive ÷ {formatDuration(d.countedSeconds)} counted
+                  {!hasSchedule
+                    ? 'No schedule for this shift'
+                    : d.productiveBaseSeconds == null
+                      ? 'Not logged in during scheduled hours yet'
+                      : `${formatDuration(d.productiveSeconds)} productive ÷ (${formatDuration(d.countedSeconds)} logged − ${formatDuration(d.breakAllowanceSeconds)} break allowance)`}
+                  {agent.efficiencyPct === 100 && d.productiveBaseSeconds === d.productiveSeconds && d.productiveSeconds > 0 ? ' · capped at 100%' : ''}
                 </div>
               </div>
               <div className="live-detail-tile">
@@ -130,7 +135,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
               </table>
             ) : (
               <p className="live-detail-note">
-                No schedule loaded for this day - all logged time counts toward Productive Hrs, and adherence can't be measured.
+                No schedule loaded for this day - Productive Hrs and adherence can't be measured until one is added.
               </p>
             )}
 

@@ -140,42 +140,43 @@ export default function DashboardPage() {
     });
   }, [rows, groupFilter, agentFilter]);
 
-  // One point per day - sums ALL agents together for that day (overall,
-  // or within the selected group), then computes productive % from those
-  // summed totals - same "sum first, then divide" reasoning as
-  // ReportsPage's monthly aggregation, not an average of per-agent
-  // percentages. Days nobody logged time on (e.g. a scheduled day that
-  // hasn't happened yet) are left off rather than plotted as 0%.
+  // Productive Hrs % = summed productive hours ÷ summed productive
+  // base hours (each agent/day's login hours minus its break allowance,
+  // worked out server-side - see productiveHrs in reportRoutes.js).
+  // Only agent/days WITH a schedule count; without one there's no
+  // Productive Hrs %. Summing first, then dividing - not averaging
+  // per-agent percentages - same as ReportsPage's monthly aggregation.
+  function sumProductive(list) {
+    let productiveHours = 0;
+    let baseHours = 0;
+    for (const r of list) {
+      if (!r.hasSchedule || r.productiveBaseHours == null) continue;
+      productiveHours += r.productiveHours || 0;
+      baseHours += r.productiveBaseHours;
+    }
+    return baseHours > 0 ? (productiveHours / baseHours) * 100 : null;
+  }
+
+  // One point per day, all agents in the current filters together. Days
+  // with nothing to measure (no schedule, or not logged in yet) are left
+  // off rather than plotted as 0%.
   const productiveTrend = useMemo(() => {
     const byDay = new Map();
     for (const r of filteredRows) {
-      if (!byDay.has(r.date)) byDay.set(r.date, { date: r.date, totalHours: 0, productiveHours: 0 });
-      const day = byDay.get(r.date);
-      day.totalHours += r.totalHours;
-      day.productiveHours += PRODUCTIVE_AUX_CODES.reduce((sum, code) => sum + (r.auxHours[code] || 0), 0);
+      if (!byDay.has(r.date)) byDay.set(r.date, []);
+      byDay.get(r.date).push(r);
     }
-    return [...byDay.values()]
-      .filter((d) => d.totalHours > 0)
+    return [...byDay.entries()]
+      .map(([date, dayRows]) => ({ date, pct: sumProductive(dayRows) }))
+      .filter((d) => d.pct != null)
       .sort((a, b) => a.date.localeCompare(b.date))
       .map((d) => ({
         day: formatDayShort(d.date), // ranges can span months, so "Oct 3" rather than a bare day number
-        productive: Number(((d.productiveHours / d.totalHours) * 100).toFixed(1)),
+        productive: Number(d.pct.toFixed(1)),
       }));
   }, [filteredRows]);
 
-  // Overall productive % across the whole filtered range (all days, all
-  // agents in the current filters) - same "sum first, then divide" math
-  // as everywhere else it gets computed, not an average of daily/agent
-  // percentages.
-  const overallProductive = useMemo(() => {
-    let totalHours = 0;
-    let productiveHours = 0;
-    for (const r of filteredRows) {
-      totalHours += r.totalHours;
-      productiveHours += PRODUCTIVE_AUX_CODES.reduce((sum, code) => sum + (r.auxHours[code] || 0), 0);
-    }
-    return totalHours > 0 ? (productiveHours / totalHours) * 100 : 0;
-  }, [filteredRows]);
+  const overallProductive = useMemo(() => sumProductive(filteredRows), [filteredRows]);
 
   // Same "sum first, then divide" approach, but only over days that
   // actually have a schedule loaded (hasSchedule: true) - a day
@@ -210,8 +211,9 @@ export default function DashboardPage() {
   // Per hour: the AVERAGE minutes per agent in each aux code - each
   // code's total divided by the number of agents who recorded any time
   // in that hour, so a full hour stacks to at most 60m however many
-  // agents are on. productivePct is that hour's Productive Hrs % - sum
-  // first, then divide, same as everywhere else.
+  // agents are on. productivePct is that hour's productive SHARE of all
+  // recorded time - not Productive Hrs %, whose break allowance only
+  // makes sense per shift, not per hour.
   const { hourlyAux, hourlyCodes } = useMemo(() => {
     if (filteredHourly.length === 0) return { hourlyAux: [], hourlyCodes: [] };
     const byHour = new Map();
@@ -358,9 +360,15 @@ export default function DashboardPage() {
               <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
                 <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
                   <h3 style={{ marginBottom: 4 }}>{periodLabel} Productive Hrs</h3>
-                  <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(overallProductive) }}>
-                    {overallProductive.toFixed(1)}%
-                  </div>
+                  {overallProductive == null ? (
+                    <div style={{ fontSize: 16, color: '#999', padding: '14px 0' }}>
+                      No scheduled time {isLive ? 'so far today' : 'in this date range'}.
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(overallProductive) }}>
+                      {overallProductive.toFixed(1)}%
+                    </div>
+                  )}
                 </div>
 
                 <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
@@ -406,7 +414,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="dashboard-card">
-                    <h3>Average Productive Hrs % by Hour (Today)</h3>
+                    <h3>Productive Share by Hour (Today)</h3>
                     {hourlyAux.length === 0 ? (
                       <p style={{ fontSize: 14, color: '#999' }}>No aux time recorded yet today.</p>
                     ) : (
@@ -423,7 +431,7 @@ export default function DashboardPage() {
                             strokeWidth={2}
                             dot={{ r: 3 }}
                             connectNulls
-                            name="Productive Hrs %"
+                            name="Productive Share %"
                           />
                         </LineChart>
                       </ResponsiveContainer>

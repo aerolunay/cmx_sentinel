@@ -16,9 +16,9 @@ export function formatDuration(totalSeconds) {
 }
 
 export function getEfficiencyColor(pct) {
-  if (pct >= 88) return '#1e3a8a'; // dark blue
-  if (pct >= 85) return '#166534'; // dark green
-  if (pct >= 80) return '#c2660a'; // orange
+  if (pct >= 98) return '#1e3a8a'; // dark blue
+  if (pct >= 95) return '#166534'; // dark green
+  if (pct >= 90) return '#c2660a'; // orange
   return '#b91c1c'; // red
 }
 

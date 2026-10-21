@@ -19,6 +19,30 @@ router.use(requireAuth);
 // trigger set, by explicit request.
 const PRODUCTIVE_AUX_CODES = ["Production", "Admin", "Adhoc", "Coaching", "Meeting", "Training"];
 
+// Productive Hrs % = productive time ÷ (login hours - break allowance),
+// where login hours is the time logged INSIDE the schedule - so it can
+// never exceed the scheduled hours, and overtime only counts once it's
+// been added to the schedule. The allowance grows with the login:
+//   <= 6h: 0.5h   > 6h-9h: 1h   > 9h-12h: 1.5h   > 12h: 2h
+function breakAllowanceSeconds(loginSeconds) {
+  const hours = loginSeconds / 3600;
+  if (hours <= 6) return 0.5 * 3600;
+  if (hours <= 9) return 1 * 3600;
+  if (hours <= 12) return 1.5 * 3600;
+  return 2 * 3600;
+}
+
+// Only for an agent/day WITH a schedule - without one there's no
+// Productive Hrs % at all (callers return null). baseSeconds is the
+// denominator, never below the productive time itself, so the % is
+// capped at 100 (early in a shift the allowance alone can push it over)
+// and dashboards/monthly totals can sum it and divide once.
+function productiveHrs(productiveSeconds, loginSeconds) {
+  if (loginSeconds <= 0) return { baseSeconds: 0, pct: null };
+  const baseSeconds = Math.max(loginSeconds - breakAllowanceSeconds(loginSeconds), productiveSeconds);
+  return { baseSeconds, pct: baseSeconds > 0 ? (productiveSeconds / baseSeconds) * 100 : 0 };
+}
+
 // _est columns and agent_schedules are plain Eastern wall-clock values,
 // so they're compared as naive timestamps (parsed as if UTC) - the same
 // thing TIMESTAMPDIFF does with them in the SQL below.
@@ -328,6 +352,9 @@ router.get("/efficiency", async (req, res) => {
         ? creditedGapSeconds.get(`${entry.agentId}|${entry.date}`) || 0
         : 0;
       const adherentSeconds = totalSeconds + creditedSeconds;
+      // No schedule, no Productive Hrs % - the aux rows are still
+      // returned, so it appears on its own once a schedule is added.
+      const productive = entry.hasSchedule ? productiveHrs(productiveSeconds, totalSeconds) : null;
 
       return {
         date: entry.date,
@@ -340,7 +367,11 @@ router.get("/efficiency", async (req, res) => {
           Object.entries(auxSeconds).map(([code, seconds]) => [code, seconds / 3600])
         ),
         totalHours: totalSeconds / 3600,
-        efficiencyPct: totalSeconds > 0 ? (productiveSeconds / totalSeconds) * 100 : 0,
+        // Productive Hrs % and its two sides - the hours are exposed so
+        // dashboard/monthly totals can sum them and divide once.
+        productiveHours: productiveSeconds / 3600,
+        productiveBaseHours: productive ? productive.baseSeconds / 3600 : null,
+        efficiencyPct: productive ? productive.pct : null,
         // Only meaningful once a schedule exists - null (not 0) when
         // it doesn't, so the frontend can render "N/A" instead of a
         // misleading 0%.
@@ -595,6 +626,7 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       0
     );
     const loggedSeconds = [...auxTotals.values()].reduce((sum, t) => sum + t.loggedSeconds, 0);
+    const productive = hasSchedule ? productiveHrs(productiveSeconds, countedSeconds) : null;
 
     return {
       agentId: cur.agent_id,
@@ -603,7 +635,7 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       groupName: cur.group_name,
       auxCode: cur.aux_code,
       auxSeconds: Math.max(0, Math.round((nowMs - toMs(cur.aux_started_est)) / 1000)),
-      efficiencyPct: countedSeconds > 0 ? (productiveSeconds / countedSeconds) * 100 : null,
+      efficiencyPct: productive ? productive.pct : null,
       adherencePct: elapsedScheduledSeconds > 0 ? (adherentSeconds / elapsedScheduledSeconds) * 100 : null,
       detail: {
         shiftDate: cur.shiftDate,
@@ -628,6 +660,8 @@ async function loadLiveAgents(req, onlyAgentId = null) {
         loggedSeconds: Math.round(loggedSeconds),
         countedSeconds: Math.round(countedSeconds),
         productiveSeconds: Math.round(productiveSeconds),
+        breakAllowanceSeconds: productive && countedSeconds > 0 ? breakAllowanceSeconds(countedSeconds) : null,
+        productiveBaseSeconds: productive ? Math.round(productive.baseSeconds) : null,
         creditedGapSeconds: Math.round(creditedGapSeconds),
         adherentSeconds: Math.round(adherentSeconds),
         scheduledSeconds: hasSchedule ? Math.round(scheduledSeconds) : null,

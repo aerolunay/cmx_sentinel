@@ -16,17 +16,42 @@ export default function MetricsHelpModal({ onClose }) {
         <section>
           <h3>Productive Hrs %</h3>
           <div className="metrics-formula">
-            Productive Hrs % = Productive time ÷ Counted time × 100
+            Productive Hrs % = Productive time ÷ (Login hours − Break allowance) × 100
           </div>
           <ul>
             <li><strong>Productive time</strong> - Production, Admin, Adhoc, Coaching, Meeting and Training.</li>
-            <li><strong>Counted time</strong> - all aux time logged <em>inside</em> the agent's scheduled hours. On a day with no schedule loaded, all logged time counts.</li>
+            <li>
+              <strong>Login hours</strong> - all aux time logged <em>inside</em> the agent's scheduled hours, so it can
+              never be more than the schedule. Overtime only counts once it has been added to the schedule.
+            </li>
+            <li>
+              <strong>Break allowance</strong> - based on the login hours:
+              <table className="metrics-help-colors" style={{ margin: '6px 0' }}>
+                <thead><tr><th>Login hours</th><th>Allowance</th></tr></thead>
+                <tbody>
+                  <tr><td>6h or less</td><td>0.5h</td></tr>
+                  <tr><td>over 6h, up to 9h</td><td>1h</td></tr>
+                  <tr><td>over 9h, up to 12h</td><td>1.5h</td></tr>
+                  <tr><td>over 12h</td><td>2h</td></tr>
+                </tbody>
+              </table>
+            </li>
+            <li>Never shown above 100%. With no schedule loaded for the day it shows <strong>N/A</strong> - the time is kept and is calculated as soon as a schedule is added.</li>
           </ul>
           <div className="metrics-example">
-            <div className="metrics-example-title">Example</div>
-            Shift 8:00 AM - 5:00 PM. Inside it the agent logs Production 6h, Meeting 0.5h, Lunch 1h, Break 0.5h, Idle 0.5h.
-            <div className="metrics-calc">(6 + 0.5) ÷ (6 + 0.5 + 1 + 0.5 + 0.5) = 6.5 ÷ 8.5 = <strong>76.5%</strong></div>
-            Time logged before 8:00 AM or after 5:00 PM is left out of both sides.
+            <div className="metrics-example-title">Example - full 9h shift</div>
+            Shift 8:00 AM - 5:00 PM. Inside it the agent logs Production 6.5h, Meeting 0.5h, Lunch 1h, Break 0.5h, Idle 0.5h (9h in total).
+            <div className="metrics-calc">(6.5 + 0.5) ÷ (9 − 1) = 7 ÷ 8 = <strong>87.5%</strong></div>
+          </div>
+          <div className="metrics-example" style={{ marginTop: 8 }}>
+            <div className="metrics-example-title">Example - stayed late without overtime</div>
+            Same 9h shift, but the agent stays logged in until 7:00 PM. Only the 9 scheduled hours count, so the
+            allowance stays 1h and the extra 2 hours are left out of both sides. If 2h of overtime had been added to
+            the schedule, login hours would be 11h and the allowance 1.5h: 11 − 1.5 = 9.5h denominator.
+          </div>
+          <div className="metrics-example" style={{ marginTop: 8 }}>
+            <div className="metrics-example-title">Example - early in the shift</div>
+            2h in, all of it Production: 2 ÷ (2 − 0.5) would be 133%, so it shows <strong>100%</strong>.
           </div>
         </section>
 
@@ -57,27 +82,27 @@ export default function MetricsHelpModal({ onClose }) {
           </p>
           <div className="metrics-example">
             <div className="metrics-example-title">Example</div>
-            Agent A: 7.2h productive of 8h (90%). Agent B: 1h productive of 2h (50%).
+            Agent A: 7.2h productive ÷ 8h (90%). Agent B: 1h productive ÷ 2h (50%) - each after their own break allowance.
             <div className="metrics-calc">(7.2 + 1) ÷ (8 + 2) = <strong>82%</strong> - not (90 + 50) ÷ 2 = 70%</div>
-            Days without a schedule are left out of adherence entirely instead of counting as 0%.
+            Days without a schedule are left out of both numbers entirely instead of counting as 0%.
           </div>
         </section>
 
         <section>
           <h3>Live view hourly charts</h3>
           <p>
-            These use all recorded aux time in each clock hour, scheduled or not, so they can differ from the
-            Today cards, which only count time inside schedules.
+            These use all recorded aux time in each clock hour, scheduled or not, and no break allowance, so they
+            can differ from the Today cards.
           </p>
           <ul>
             <li><strong>Average aux time per agent</strong> - each aux code's total minutes in the hour ÷ the number of agents who recorded any time in that hour.</li>
-            <li><strong>Average Productive Hrs %</strong> - productive minutes ÷ all recorded minutes in the hour, across those agents.</li>
+            <li><strong>Productive Share</strong> - productive minutes ÷ all recorded minutes in the hour, across those agents.</li>
           </ul>
           <div className="metrics-example">
             <div className="metrics-example-title">Example - 9 AM to 10 AM</div>
             3 agents record Production 150m, Break 15m and Idle 15m between them.
             <div className="metrics-calc">Production 150 ÷ 3 = <strong>50m</strong> · Break 15 ÷ 3 = <strong>5m</strong> · Idle 15 ÷ 3 = <strong>5m</strong></div>
-            <div className="metrics-calc">Productive Hrs % = 150 ÷ 180 = <strong>83.3%</strong></div>
+            <div className="metrics-calc">Productive Share = 150 ÷ 180 = <strong>83.3%</strong></div>
             The current hour is still in progress, so its bar is shorter until the hour ends.
           </div>
         </section>
@@ -89,10 +114,10 @@ export default function MetricsHelpModal({ onClose }) {
               <tr><th /><th>Productive Hrs</th><th>Adherence</th></tr>
             </thead>
             <tbody>
-              <tr><td><span className="metrics-swatch" style={{ background: '#1e3a8a' }} />Dark blue</td><td>88% +</td><td>98% +</td></tr>
-              <tr><td><span className="metrics-swatch" style={{ background: '#166534' }} />Green</td><td>85 - 87.9%</td><td>95 - 97.99%</td></tr>
-              <tr><td><span className="metrics-swatch" style={{ background: '#c2660a' }} />Orange</td><td>80 - 84.9%</td><td>90 - 94.99%</td></tr>
-              <tr><td><span className="metrics-swatch" style={{ background: '#b91c1c' }} />Red</td><td>below 80%</td><td>below 90%</td></tr>
+              <tr><td><span className="metrics-swatch" style={{ background: '#1e3a8a' }} />Dark blue</td><td>98% +</td><td>98% +</td></tr>
+              <tr><td><span className="metrics-swatch" style={{ background: '#166534' }} />Green</td><td>95 - 97.99%</td><td>95 - 97.99%</td></tr>
+              <tr><td><span className="metrics-swatch" style={{ background: '#c2660a' }} />Orange</td><td>90 - 94.99%</td><td>90 - 94.99%</td></tr>
+              <tr><td><span className="metrics-swatch" style={{ background: '#b91c1c' }} />Red</td><td>below 90%</td><td>below 90%</td></tr>
             </tbody>
           </table>
         </section>
