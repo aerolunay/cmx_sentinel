@@ -29,6 +29,16 @@ const toMs = (sqlString) => DateTime.fromSQL(sqlString, { zone: "utc" }).toMilli
 // a crashed/powered-off machine that never logged out, not a live agent.
 const MAX_OPEN_SEGMENT_HOURS = 16;
 
+// An open aux_events row (alias `ae`) that counts as running up to now:
+// recent (the ? is the MAX_OPEN_SEGMENT_HOURS cutoff) AND the agent's
+// latest segment. A failed close during a backend restart or network
+// blip leaves an older row open next to the real current one - without
+// the second check it would be counted twice. Same "most recent wins"
+// rule as loadLiveAgents.
+const RUNNING_SEGMENT_SQL = `(ae.ended_at_utc IS NULL AND ae.started_at_est >= ?
+  AND NOT EXISTS (SELECT 1 FROM aux_events later
+                  WHERE later.agent_id = ae.agent_id AND later.started_at_est > ae.started_at_est))`;
+
 // Seconds of [start, end) that fall inside any of the given windows.
 function overlapSeconds(startMs, endMs, windows) {
   let total = 0;
@@ -132,7 +142,7 @@ router.get("/efficiency", async (req, res) => {
        JOIN agents a ON a.agent_id = ae.agent_id
        LEFT JOIN agent_groups g ON g.group_id = a.group_id
        WHERE ${legacyFilter.conditions.join(" AND ")}
-         AND (ae.duration_seconds IS NOT NULL OR (ae.ended_at_utc IS NULL AND ae.started_at_est >= ?))
+         AND (ae.duration_seconds IS NOT NULL OR ${RUNNING_SEGMENT_SQL})
        GROUP BY a.agent_id, a.display_name, a.group_id, g.group_name, DATE_FORMAT(ae.started_at_est, '%Y-%m-%d'), ae.aux_code`,
       [nowEst, ...legacyFilter.params, openCutoffEst]
     );
@@ -184,7 +194,7 @@ router.get("/efficiency", async (req, res) => {
        LEFT JOIN agent_groups g ON g.group_id = a.group_id
        JOIN aux_events ae
          ON ae.agent_id = s.agent_id
-        AND (ae.ended_at_est IS NOT NULL OR (ae.ended_at_utc IS NULL AND ae.started_at_est >= ?))
+        AND (ae.ended_at_est IS NOT NULL OR ${RUNNING_SEGMENT_SQL})
         AND ae.started_at_est < s.scheduled_end
         AND COALESCE(ae.ended_at_est, ?) > s.scheduled_start
        WHERE ${overlapFilter.conditions.join(" AND ")}
@@ -376,7 +386,7 @@ router.get("/hourly-aux", async (req, res) => {
 
     const conditions = [
       "ae.started_at_est < ?",
-      "(ae.ended_at_est > ? OR (ae.ended_at_utc IS NULL AND ae.started_at_est >= ?))",
+      `(ae.ended_at_est > ? OR ${RUNNING_SEGMENT_SQL})`,
     ];
     const params = [nowEst, dayStartEst, openCutoffEst];
     if (scopedGroupIds !== null) {
