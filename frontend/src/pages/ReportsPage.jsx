@@ -140,9 +140,9 @@ function toCsv(rows) {
       `"${r.groupName || ''}"`,
       ...AUX_CODES.map((code) => (r.auxHours[code] || 0).toFixed(2)),
       r.totalHours.toFixed(2),
-      r.efficiencyPct == null ? '' : r.efficiencyPct.toFixed(1),
+      r.efficiencyPct == null ? '' : r.efficiencyPct.toFixed(2),
       r.scheduledHours == null ? '' : r.scheduledHours.toFixed(2),
-      r.adherencePct == null ? '' : r.adherencePct.toFixed(1),
+      r.adherencePct == null ? '' : r.adherencePct.toFixed(2),
     ];
     lines.push(line.join(','));
   }
@@ -292,11 +292,11 @@ export default function ReportsPage() {
                   ))}
                   <td>{formatHours(r.totalHours)}</td>
                   <td style={r.efficiencyPct == null ? undefined : { fontWeight: 600, color: getEfficiencyColor(r.efficiencyPct) }}>
-                    {r.efficiencyPct == null ? <em style={{ color: '#999' }}>N/A</em> : `${r.efficiencyPct.toFixed(1)}%`}
+                    {r.efficiencyPct == null ? <em style={{ color: '#999' }}>N/A</em> : `${r.efficiencyPct.toFixed(2)}%`}
                   </td>
                   <td>{r.scheduledHours == null ? <em style={{ color: '#999' }}>no schedule</em> : formatHours(r.scheduledHours)}</td>
                   <td style={r.adherencePct == null ? undefined : { fontWeight: 600, color: getAdherenceColor(r.adherencePct) }}>
-                    {r.adherencePct == null ? <em style={{ color: '#999' }}>N/A</em> : `${r.adherencePct.toFixed(1)}%`}
+                    {r.adherencePct == null ? <em style={{ color: '#999' }}>N/A</em> : `${r.adherencePct.toFixed(2)}%`}
                   </td>
                 </tr>
               ))}
