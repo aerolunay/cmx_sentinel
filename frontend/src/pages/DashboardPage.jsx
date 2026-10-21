@@ -1,65 +1,111 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import { useAuth } from '../context/AuthContext.jsx';
 import { api } from '../api.js';
 import Setup2FAModal from '../modals/Setup2FAModal.jsx';
+import MetricsHelpModal from '../modals/MetricsHelpModal.jsx';
 import { formatRole } from '../utils/roles.js';
 import { AUX_COLORS, getEfficiencyColor, getAdherenceColor } from '../utils/metrics.js';
+import {
+  HISTORICAL_PRESETS, getPresetRange, getTodayEastern, formatDayShort, formatRangeLabel,
+} from '../utils/dateRanges.js';
 import LiveAgentsPanel from '../components/LiveAgentsPanel.jsx';
+import DateRangePicker from '../components/DateRangePicker.jsx';
 
 const PRODUCTIVE_AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Coaching', 'Meeting', 'Training'];
 const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle'];
 
-function getCurrentMonthEastern() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date()).slice(0, 7); // "2026-09-15" -> "2026-09"
+// How often the Live view's stats reload (the live agents panel has its
+// own, faster refresh).
+const LIVE_REFRESH_MS = 60000;
+
+// "8 AM", "12 PM" ... for an Eastern hour-of-day number.
+function formatHourLabel(hour) {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
-// Pure arithmetic (day-count of a month), not a display conversion -
-// safe to use a plain Date object here unlike formatting a specific
-// calendar day for display (see ReportsPage.jsx's formatDailyDate for
-// why THAT needs to avoid Date entirely).
-function getMonthRange(monthStr) {
-  const [y, m] = monthStr.split('-').map(Number);
-  const lastDayNum = new Date(y, m, 0).getDate();
-  return { dateFrom: `${monthStr}-01`, dateTo: `${monthStr}-${String(lastDayNum).padStart(2, '0')}` };
+function formatHoursAsDuration(hours) {
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
+
+const selectStyle = { padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 };
 
 export default function DashboardPage() {
   const { user, refreshUser } = useAuth();
   const [show2FAModal, setShow2FAModal] = useState(false);
-  const [month, setMonth] = useState(getCurrentMonthEastern());
+  const [showHelp, setShowHelp] = useState(false);
+  // 'live' = today so far, with the live agents panel; 'historical' = a
+  // preset or custom date range, without it.
+  const [view, setView] = useState('live');
+  const [preset, setPreset] = useState('thisMonth');
+  const [customRange, setCustomRange] = useState(null);
   const [groupFilter, setGroupFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
   const [rows, setRows] = useState([]);
+  const [hourlyRows, setHourlyRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    loadMonth();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  const isLive = view === 'live';
+  const today = getTodayEastern();
+  let range;
+  if (isLive) range = { dateFrom: today, dateTo: today };
+  else if (preset === 'custom') range = customRange; // null until both ends are picked
+  else range = getPresetRange(preset, today);
 
-  async function loadMonth() {
-    setLoading(true);
-    setError('');
-    try {
-      // Always fetched WITHOUT a group filter - group filtering happens
-      // client-side below so switching groups is instant and doesn't
-      // need a new request, and so the group dropdown itself can be
-      // built from whatever groups actually appear in this month's data.
-      const { dateFrom, dateTo } = getMonthRange(month);
-      const data = await api.getEfficiencyReport({ dateFrom, dateTo });
-      setRows(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
+  useEffect(() => {
+    if (!range) {
+      setRows([]);
       setLoading(false);
+      return undefined;
     }
-  }
+    let cancelled = false;
+
+    async function load({ quiet = false } = {}) {
+      if (!quiet) {
+        setLoading(true);
+        setError('');
+      }
+      try {
+        // Always fetched WITHOUT a group filter - group filtering happens
+        // client-side below so switching groups is instant and doesn't
+        // need a new request, and so the group dropdown itself can be
+        // built from whatever groups actually appear in this range's data.
+        const [data, hourly] = await Promise.all([
+          api.getEfficiencyReport(range),
+          isLive ? api.getHourlyAux() : [],
+        ]);
+        if (cancelled) return;
+        setRows(data);
+        setHourlyRows(hourly);
+        setError('');
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled && !quiet) setLoading(false);
+      }
+    }
+
+    load();
+    if (!isLive) return () => { cancelled = true; };
+
+    // Live: keep today's running numbers fresh without flashing
+    // "Loading...", paused while the tab is hidden.
+    const refresh = setInterval(() => {
+      if (!document.hidden) load({ quiet: true });
+    }, LIVE_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(refresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLive, range?.dateFrom, range?.dateTo]);
 
   const groupOptions = useMemo(() => {
     const seen = new Map();
@@ -96,11 +142,12 @@ export default function DashboardPage() {
   }, [rows, groupFilter, agentFilter]);
 
   // One point per day - sums ALL agents together for that day (overall,
-  // or within the selected group), then computes efficiency from those
+  // or within the selected group), then computes productive % from those
   // summed totals - same "sum first, then divide" reasoning as
   // ReportsPage's monthly aggregation, not an average of per-agent
-  // percentages.
-  const efficiencyTrend = useMemo(() => {
+  // percentages. Days nobody logged time on (e.g. a scheduled day that
+  // hasn't happened yet) are left off rather than plotted as 0%.
+  const productiveTrend = useMemo(() => {
     const byDay = new Map();
     for (const r of filteredRows) {
       if (!byDay.has(r.date)) byDay.set(r.date, { date: r.date, totalHours: 0, productiveHours: 0 });
@@ -109,18 +156,19 @@ export default function DashboardPage() {
       day.productiveHours += PRODUCTIVE_AUX_CODES.reduce((sum, code) => sum + (r.auxHours[code] || 0), 0);
     }
     return [...byDay.values()]
+      .filter((d) => d.totalHours > 0)
+      .sort((a, b) => a.date.localeCompare(b.date))
       .map((d) => ({
-        day: Number(d.date.slice(-2)), // just the day-of-month number for a compact x-axis
-        efficiency: d.totalHours > 0 ? Number(((d.productiveHours / d.totalHours) * 100).toFixed(1)) : 0,
-      }))
-      .sort((a, b) => a.day - b.day);
+        day: formatDayShort(d.date), // ranges can span months, so "Oct 3" rather than a bare day number
+        productive: Number(((d.productiveHours / d.totalHours) * 100).toFixed(1)),
+      }));
   }, [filteredRows]);
 
-  // Overall efficiency across the whole filtered month (all days, all
-  // agents in the current group filter) - same "sum first, then
-  // divide" math as everywhere else efficiency gets computed, not an
-  // average of daily/agent percentages.
-  const monthToDateEfficiency = useMemo(() => {
+  // Overall productive % across the whole filtered range (all days, all
+  // agents in the current filters) - same "sum first, then divide" math
+  // as everywhere else it gets computed, not an average of daily/agent
+  // percentages.
+  const overallProductive = useMemo(() => {
     let totalHours = 0;
     let productiveHours = 0;
     for (const r of filteredRows) {
@@ -133,8 +181,11 @@ export default function DashboardPage() {
   // Same "sum first, then divide" approach, but only over days that
   // actually have a schedule loaded (hasSchedule: true) - a day
   // without one simply doesn't contribute to either side of the
-  // ratio, rather than being treated as 0% adherence.
-  const monthToDateAdherence = useMemo(() => {
+  // ratio, rather than being treated as 0% adherence. scheduledHours
+  // is only the scheduled time elapsed so far (see
+  // /api/reports/efficiency), so the rest of today and future days add
+  // nothing to the denominator.
+  const overallAdherence = useMemo(() => {
     let scheduledHours = 0;
     let scheduledLoggedHours = 0;
     let hasAnySchedule = false;
@@ -146,6 +197,42 @@ export default function DashboardPage() {
     }
     return hasAnySchedule && scheduledHours > 0 ? (scheduledLoggedHours / scheduledHours) * 100 : null;
   }, [filteredRows]);
+
+  // Live view: recorded aux time per hour of today, one stacked bar per
+  // hour. The hours shown run from the first to the last hour anything
+  // was recorded in (empty hours in between kept so the axis is even),
+  // and only aux codes that actually appear get a series.
+  const filteredHourly = useMemo(() => hourlyRows.filter((r) => {
+    if (groupFilter && String(r.groupId) !== groupFilter) return false;
+    if (agentFilter && String(r.agentId) !== agentFilter) return false;
+    return true;
+  }), [hourlyRows, groupFilter, agentFilter]);
+
+  const { hourlyAux, hourlyCodes } = useMemo(() => {
+    if (filteredHourly.length === 0) return { hourlyAux: [], hourlyCodes: [] };
+    const byHour = new Map();
+    const codes = new Set();
+    for (const r of filteredHourly) {
+      if (!byHour.has(r.hour)) byHour.set(r.hour, {});
+      const hour = byHour.get(r.hour);
+      hour[r.auxCode] = (hour[r.auxCode] || 0) + r.seconds / 3600;
+      codes.add(r.auxCode);
+    }
+    const hours = [...byHour.keys()];
+    const data = [];
+    for (let h = Math.min(...hours); h <= Math.max(...hours); h++) {
+      const entry = { hour: formatHourLabel(h) };
+      for (const [code, value] of Object.entries(byHour.get(h) || {})) entry[code] = Number(value.toFixed(3));
+      data.push(entry);
+    }
+    // Same order as the aux breakdown chart, unknown codes last.
+    const ordered = [...codes].sort((a, b) => {
+      const ia = AUX_CODES.indexOf(a);
+      const ib = AUX_CODES.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    return { hourlyAux: data, hourlyCodes: ordered };
+  }, [filteredHourly]);
 
   // Each aux code's SHARE of total logged time, not raw hours - easier
   // to compare across agents/groups of different total hours this way.
@@ -164,21 +251,51 @@ export default function DashboardPage() {
     }));
   }, [filteredRows]);
 
+  const periodLabel = isLive ? 'Today' : range ? formatRangeLabel(range) : '';
+  const hasData = filteredRows.some((r) => r.totalHours > 0 || r.scheduledHours > 0);
+
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-        <h2 style={{ margin: 0 }}>Dashboard</h2>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <input
-            type="month"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
-          />
+      <div className="dashboard-toolbar">
+        <div className="dashboard-toolbar-left">
+          <div className={`view-switch${isLive ? '' : ' is-historical'}`} role="tablist" aria-label="Dashboard view">
+            <span className="view-switch-thumb" aria-hidden="true" />
+            <button type="button" role="tab" aria-selected={isLive} className={isLive ? 'active' : ''} onClick={() => setView('live')}>
+              <span className="live-dot" aria-hidden="true" />Live
+            </button>
+            <button type="button" role="tab" aria-selected={!isLive} className={isLive ? '' : 'active'} onClick={() => setView('historical')}>
+              Historical
+            </button>
+          </div>
+          <h2 style={{ margin: 0 }}>Dashboard</h2>
+          <button
+            type="button"
+            className="help-button"
+            onClick={() => setShowHelp(true)}
+            aria-label="How are these numbers calculated?"
+            title="How are these numbers calculated?"
+          >
+            ?
+          </button>
+        </div>
+
+        <div className="dashboard-toolbar-right">
+          {!isLive && (
+            <>
+              <select value={preset} onChange={(e) => setPreset(e.target.value)} style={selectStyle} aria-label="Date range">
+                {HISTORICAL_PRESETS.map((p) => (
+                  <option key={p.key} value={p.key}>{p.label}</option>
+                ))}
+              </select>
+              {preset === 'custom' && (
+                <DateRangePicker value={customRange} onChange={setCustomRange} maxDate={today} />
+              )}
+            </>
+          )}
           <select
             value={groupFilter}
             onChange={(e) => { setGroupFilter(e.target.value); setAgentFilter(''); }}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
+            style={selectStyle}
           >
             <option value="">All Groups</option>
             {groupOptions.map(([id, name]) => (
@@ -188,7 +305,7 @@ export default function DashboardPage() {
           <select
             value={agentFilter}
             onChange={(e) => setAgentFilter(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
+            style={selectStyle}
           >
             <option value="">All Agents</option>
             {agentOptions.map(([id, name]) => (
@@ -213,69 +330,101 @@ export default function DashboardPage() {
 
       <div className="dashboard-layout">
         <div className="dashboard-main">
-          {loading ? (
+          {!range ? (
+            <p>Pick a start and end date to see the numbers.</p>
+          ) : loading ? (
             <p>Loading...</p>
-          ) : filteredRows.length === 0 ? (
-            <p>No data for this month{groupFilter || agentFilter ? ' / filter' : ''} yet.</p>
+          ) : !hasData ? (
+            <p>No data for {isLive ? 'today' : 'this date range'}{groupFilter || agentFilter ? ' / filter' : ''} yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
               <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
                 <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
-                  <h3 style={{ marginBottom: 4 }}>Month to Date Efficiency</h3>
-                  <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(monthToDateEfficiency) }}>
-                    {monthToDateEfficiency.toFixed(1)}%
+                  <h3 style={{ marginBottom: 4 }}>{periodLabel} Productive Hrs</h3>
+                  <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(overallProductive) }}>
+                    {overallProductive.toFixed(1)}%
                   </div>
                 </div>
 
                 <div className="dashboard-card" style={{ textAlign: 'center', flex: '1 1 240px' }}>
-                  <h3 style={{ marginBottom: 4 }}>Month to Date Schedule Adherence</h3>
-                  {monthToDateAdherence == null ? (
-                    <div style={{ fontSize: 16, color: '#999', padding: '14px 0' }}>No schedule data for this month yet.</div>
+                  <h3 style={{ marginBottom: 4 }}>{periodLabel} Schedule Adherence</h3>
+                  {overallAdherence == null ? (
+                    <div style={{ fontSize: 16, color: '#999', padding: '14px 0' }}>
+                      No scheduled time {isLive ? 'so far today' : 'in this date range'}.
+                    </div>
                   ) : (
-                    <div style={{ fontSize: 48, fontWeight: 700, color: getAdherenceColor(monthToDateAdherence) }}>
-                      {monthToDateAdherence.toFixed(1)}%
+                    <div style={{ fontSize: 48, fontWeight: 700, color: getAdherenceColor(overallAdherence) }}>
+                      {overallAdherence.toFixed(1)}%
                     </div>
                   )}
                 </div>
               </div>
 
+              {isLive ? (
               <div className="dashboard-card">
-                <h3>Efficiency Trend</h3>
-                <ResponsiveContainer width="100%" height={260}>
-                  <LineChart data={efficiencyTrend} margin={{ top: 5, right: 20, left: 0, bottom: 24 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                    <XAxis dataKey="day" label={{ value: 'Day of Month', position: 'insideBottom', offset: -14 }} fontSize={12} />
-                    <YAxis domain={[0, 100]} unit="%" fontSize={12} />
-                    <Tooltip formatter={(value) => `${value}%`} labelFormatter={(day) => `Day ${day}`} />
-                    <Line type="monotone" dataKey="efficiency" stroke="#1e3a8a" strokeWidth={2} dot={{ r: 3 }} name="Efficiency %" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="dashboard-card">
-                <h3>Aux Code Breakdown (% of Total Time)</h3>
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={auxBreakdown}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                    <XAxis dataKey="aux" fontSize={12} angle={-20} textAnchor="end" height={60} />
-                    <YAxis unit="%" fontSize={12} />
-                    <Tooltip formatter={(value) => `${value}%`} />
-                    <Bar dataKey="pct" name="% of Total Time">
-                      {auxBreakdown.map((entry) => (
-                        <Cell key={entry.aux} fill={AUX_COLORS[entry.aux]} />
+                <h3>Aux Time by Hour (Today)</h3>
+                {hourlyAux.length === 0 ? (
+                  <p style={{ fontSize: 14, color: '#999' }}>No aux time recorded yet today.</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={320}>
+                    <BarChart data={hourlyAux} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                      <XAxis dataKey="hour" fontSize={12} />
+                      <YAxis fontSize={12} tickFormatter={(v) => `${v}h`} />
+                      <Tooltip formatter={(value) => formatHoursAsDuration(value)} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {hourlyCodes.map((code) => (
+                        <Bar key={code} dataKey={code} stackId="aux" name={code} fill={AUX_COLORS[code] || '#9ca3af'} />
                       ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </div>
+              ) : (
+                <>
+                <div className="dashboard-card">
+                  <h3>Productive Hrs Trend</h3>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={productiveTrend} margin={{ top: 5, right: 20, left: 0, bottom: 24 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                      <XAxis dataKey="day" label={{ value: 'Day', position: 'insideBottom', offset: -14 }} fontSize={12} />
+                      <YAxis domain={[0, 100]} unit="%" fontSize={12} />
+                      <Tooltip formatter={(value) => `${value}%`} />
+                      <Line type="monotone" dataKey="productive" stroke="#1e3a8a" strokeWidth={2} dot={{ r: 3 }} name="Productive Hrs %" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="dashboard-card">
+                  <h3>Aux Code Breakdown (% of Total Time)</h3>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={auxBreakdown}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                      <XAxis dataKey="aux" fontSize={12} angle={-20} textAnchor="end" height={60} />
+                      <YAxis unit="%" fontSize={12} />
+                      <Tooltip formatter={(value) => `${value}%`} />
+                      <Bar dataKey="pct" name="% of Total Time">
+                        {auxBreakdown.map((entry) => (
+                          <Cell key={entry.aux} fill={AUX_COLORS[entry.aux]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                </>
+              )}
             </div>
           )}
         </div>
 
-        <div className="dashboard-side">
-          <LiveAgentsPanel groupFilter={groupFilter} agentFilter={agentFilter} />
-        </div>
+        {isLive && (
+          <div className="dashboard-side">
+            <LiveAgentsPanel groupFilter={groupFilter} agentFilter={agentFilter} />
+          </div>
+        )}
       </div>
+
+      {showHelp && <MetricsHelpModal onClose={() => setShowHelp(false)} />}
 
       {show2FAModal && (
         <Setup2FAModal

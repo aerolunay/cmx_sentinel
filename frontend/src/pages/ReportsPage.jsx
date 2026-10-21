@@ -127,7 +127,7 @@ function getAdherenceColor(pct) {
 }
 
 function toCsv(rows) {
-  const headers = ['Date', 'Agent', 'Agent ID', 'Group', ...AUX_CODES, 'Total Hours', 'Efficiency %', 'Scheduled Hours', 'Adherence %'];
+  const headers = ['Date', 'Agent', 'Agent ID', 'Group', ...AUX_CODES, 'Total Hours', 'Productive Hrs %', 'Scheduled Hours', 'Adherence %'];
   const lines = [headers.join(',')];
 
   for (const r of rows) {
@@ -274,7 +274,7 @@ export default function ReportsPage() {
                 <th>Group</th>
                 {AUX_CODES.map((code) => <th key={code}>{code}</th>)}
                 <th>Total Hours</th>
-                <th>Efficiency %</th>
+                <th>Productive Hrs %</th>
                 <th>Scheduled Hours</th>
                 <th>Adherence %</th>
               </tr>

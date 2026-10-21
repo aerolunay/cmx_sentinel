@@ -89,7 +89,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
                 <div className="live-detail-small">{formatDuration(agent.auxSeconds)}</div>
               </div>
               <div className="live-detail-tile">
-                <div className="live-detail-label">Efficiency</div>
+                <div className="live-detail-label">Productive Hrs</div>
                 <div className="live-detail-value" style={agent.efficiencyPct == null ? undefined : { color: getEfficiencyColor(agent.efficiencyPct) }}>
                   {agent.efficiencyPct == null ? '-' : `${agent.efficiencyPct.toFixed(1)}%`}
                 </div>
@@ -130,7 +130,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
               </table>
             ) : (
               <p className="live-detail-note">
-                No schedule loaded for this day - all logged time counts toward efficiency, and adherence can't be measured.
+                No schedule loaded for this day - all logged time counts toward Productive Hrs, and adherence can't be measured.
               </p>
             )}
 
@@ -209,7 +209,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
             </table>
             {hasSchedule && outsideScheduleSeconds > 0 && (
               <p className="live-detail-note">
-                {formatDuration(outsideScheduleSeconds)} was logged outside scheduled hours and doesn't count toward efficiency or adherence.
+                {formatDuration(outsideScheduleSeconds)} was logged outside scheduled hours and doesn't count toward Productive Hrs or adherence.
               </p>
             )}
           </>
