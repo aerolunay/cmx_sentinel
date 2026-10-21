@@ -8,9 +8,13 @@ const { logAction } = require("../services/auditLog");
 
 const router = express.Router();
 
-router.use(requireAuth, requireRole("super_admin"));
+router.use(requireAuth);
 
-router.get("/", async (req, res) => {
+// Listing groups is also open to Admin - they assign agents to groups on
+// the agent edit form (agentRoutes.js allows that), which needs this
+// list for its dropdown. Everything else here (creating/renaming/
+// deleting groups, editing restrictions) stays Super Admin only.
+router.get("/", requireRole("admin", "super_admin"), async (req, res) => {
   try {
     // restriction_count is informational only (shown in GroupsPage's
     // table so an admin can tell at a glance which groups actually
@@ -31,6 +35,8 @@ router.get("/", async (req, res) => {
     res.status(500).json({ error: "A server error occurred." });
   }
 });
+
+router.use(requireRole("super_admin"));
 
 router.post("/", async (req, res) => {
   const { groupName } = req.body || {};
