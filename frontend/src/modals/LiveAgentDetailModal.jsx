@@ -96,10 +96,15 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
                 <div className="live-detail-small">
                   {!hasSchedule
                     ? 'No schedule for this shift'
-                    : d.productiveBaseSeconds == null
+                    : d.expectedSeconds == null
                       ? 'Not logged in during scheduled hours yet'
-                      : `${formatDuration(d.productiveSeconds)} productive ÷ (${formatDuration(d.countedSeconds)} logged − ${formatDuration(d.breakAllowanceSeconds)} break allowance)`}
-                  {agent.efficiencyPct === 100 && d.productiveBaseSeconds === d.productiveSeconds && d.productiveSeconds > 0 ? ' · capped at 100%' : ''}
+                      : `(${formatDuration(Math.max(0, d.expectedSeconds))} expected − ${formatDuration(d.nonProductiveSeconds)} non-productive) ÷ ${formatDuration(Math.max(0, d.expectedSeconds))} expected`}
+                  {hasSchedule && d.expectedSeconds != null && (
+                    <div>
+                      Expected = {formatDuration(d.countedSeconds)} logged − {formatDuration(d.breakAllowanceSeconds)} allowance.
+                      {' '}Non-productive = Idle + Bio Break{d.excessBreakSeconds > 0 ? ` + ${formatDuration(d.excessBreakSeconds)} Lunch/Break over the allowance` : ''}.
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="live-detail-tile">

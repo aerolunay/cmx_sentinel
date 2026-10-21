@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import {
-  AUX_COLORS, getEfficiencyColor, getAdherenceColor, formatDuration, formatAuxLabel, liveStateRank,
+  AUX_COLORS, LIVE_STATE_ORDER, getEfficiencyColor, getAdherenceColor, formatDuration, formatAuxLabel, liveStateRank,
 } from '../utils/metrics.js';
 import LiveAgentDetailModal from '../modals/LiveAgentDetailModal.jsx';
+import AuxMultiSelect from './AuxMultiSelect.jsx';
 
 const REFRESH_MS = 5000;
 
@@ -20,6 +21,8 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [detailAgentId, setDetailAgentId] = useState(null);
+  // Aux states unticked in the filter - empty means all are shown.
+  const [hiddenStates, setHiddenStates] = useState(() => new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +56,10 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
     };
   }, []);
 
-  const visibleAgents = useMemo(() => agents
+  // Group/agent filters first - the headcount badge and the per-state
+  // counts in the aux filter use this, so they don't change as states
+  // are ticked/unticked.
+  const scopedAgents = useMemo(() => agents
     .filter((a) => {
       if (groupFilter && String(a.groupId) !== groupFilter) return false;
       if (agentFilter && String(a.agentId) !== agentFilter) return false;
@@ -62,27 +68,48 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
     .sort((a, b) => liveStateRank(a.auxCode) - liveStateRank(b.auxCode)
       || b.auxSeconds - a.auxSeconds
       || a.displayName.localeCompare(b.displayName)), [agents, groupFilter, agentFilter]);
-  const loggedInCount = visibleAgents.filter((a) => a.auxCode !== 'LoggedOut').length;
+  const visibleAgents = useMemo(
+    () => scopedAgents.filter((a) => !hiddenStates.has(a.auxCode)),
+    [scopedAgents, hiddenStates]
+  );
+  const loggedInCount = scopedAgents.filter((a) => a.auxCode !== 'LoggedOut').length;
+
+  // Every known state, plus any unknown one an agent is in right now.
+  const stateCounts = useMemo(() => {
+    const counts = {};
+    for (const a of scopedAgents) counts[a.auxCode] = (counts[a.auxCode] || 0) + 1;
+    return counts;
+  }, [scopedAgents]);
+  const stateOptions = useMemo(
+    () => [...new Set([...LIVE_STATE_ORDER, ...Object.keys(stateCounts)])]
+      .sort((x, y) => liveStateRank(x) - liveStateRank(y)),
+    [stateCounts]
+  );
 
   const elapsed = Math.max(0, Math.floor((now - fetchedAt) / 1000));
 
   return (
     <div className="dashboard-card live-agents">
-      <h3>
-        Live Agent Status
-        {!loading && (
-          <span className="live-agents-count" title={`${loggedInCount} logged in, ${visibleAgents.length - loggedInCount} logged out`}>
-            {loggedInCount} logged in
-          </span>
-        )}
-      </h3>
+      <div className="live-agents-head">
+        <h3>
+          Live Agent Status
+          {!loading && (
+            <span className="live-agents-count" title={`${loggedInCount} logged in, ${scopedAgents.length - loggedInCount} logged out`}>
+              {loggedInCount} logged in
+            </span>
+          )}
+        </h3>
+        <AuxMultiSelect options={stateOptions} hidden={hiddenStates} onChange={setHiddenStates} counts={stateCounts} />
+      </div>
 
       {error && <div className="error">{error}</div>}
 
       {loading ? (
         <p style={{ fontSize: 14 }}>Loading...</p>
-      ) : visibleAgents.length === 0 ? (
+      ) : scopedAgents.length === 0 ? (
         <p style={{ fontSize: 14, color: '#999' }}>No agent activity yet today.</p>
+      ) : visibleAgents.length === 0 ? (
+        <p style={{ fontSize: 14, color: '#999' }}>No agents in the selected states.</p>
       ) : (
         <div className="live-agents-scroll">
           <table>

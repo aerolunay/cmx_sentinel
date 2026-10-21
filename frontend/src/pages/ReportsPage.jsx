@@ -27,8 +27,8 @@ function formatMonthLabel(monthStr) {
 
 // Aggregates already-fetched daily rows up to one row per
 // (agent, month). Productive Hrs % is recomputed from SUMMED hours
-// (productiveHours ÷ productiveBaseHours - each day's login hours minus
-// its break allowance, worked out server-side), not
+// (productiveCreditHours ÷ productiveBaseHours - each day's Expected
+// minus Non-productive, over its Expected, worked out server-side), not
 // averaged from the daily percentages - averaging percentages across
 // days of different lengths would be mathematically wrong (a 100%
 // efficient 2-hour day and a 50% efficient 10-hour day do NOT average
@@ -57,7 +57,7 @@ function aggregateMonthly(dailyRows) {
         groupId: r.groupId,
         groupName: r.groupName,
         auxHours: {},
-        productiveHours: 0,
+        productiveCreditHours: 0,
         productiveBaseHours: 0,
         scheduledHours: 0,
         adherentHours: 0,
@@ -73,7 +73,7 @@ function aggregateMonthly(dailyRows) {
       entry.scheduledHours += r.scheduledHours || 0;
       entry.adherentHours += r.adherentHours ?? r.totalHours;
       if (r.productiveBaseHours != null) {
-        entry.productiveHours += r.productiveHours || 0;
+        entry.productiveCreditHours += r.productiveCreditHours || 0;
         entry.productiveBaseHours += r.productiveBaseHours;
       }
     }
@@ -86,7 +86,7 @@ function aggregateMonthly(dailyRows) {
         ...entry,
         totalHours,
         efficiencyPct: entry.productiveBaseHours > 0
-          ? (entry.productiveHours / entry.productiveBaseHours) * 100
+          ? (entry.productiveCreditHours / entry.productiveBaseHours) * 100
           : null,
         adherencePct: entry.hasAnySchedule && entry.scheduledHours > 0
           ? (entry.adherentHours / entry.scheduledHours) * 100

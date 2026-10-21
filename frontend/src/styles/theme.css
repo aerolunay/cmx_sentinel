@@ -300,3 +300,33 @@ label { margin-right: 6px; }
 .range-picker-day.edge { background: #1a2b4a; color: white; border-radius: 6px; }
 .range-picker-day:disabled { color: #d4d8de; cursor: default; }
 .range-picker-hint { font-size: 12px; color: #888; text-align: center; margin-top: 8px; }
+
+/* Live agent status: title on the left, aux filter on the right. */
+.live-agents-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.live-agents-head h3 { margin: 0; }
+
+/* Aux multi-select filter */
+.aux-select { position: relative; }
+.aux-select-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 999px; background: white;
+  font-size: 12px; font-weight: 600; color: #1a2b4a; cursor: pointer; white-space: nowrap;
+}
+.aux-select-trigger:hover { border-color: #1a2b4a; }
+.aux-select-trigger.filtered { background: #1a2b4a; border-color: #1a2b4a; color: white; }
+.aux-select-trigger:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.aux-select-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; width: 200px;
+  background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 6px;
+  box-shadow: 0 8px 28px rgba(15,23,42,0.18); max-height: 360px; overflow-y: auto;
+}
+.aux-select-option {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+  font-size: 13px; color: #1a2b4a; cursor: pointer; user-select: none; margin: 0;
+}
+.aux-select-option:hover { background: #f3f4f6; }
+.aux-select-option input { margin: 0; cursor: pointer; accent-color: #1a2b4a; }
+.aux-select-all { font-weight: 600; border-bottom: 1px solid #eee; border-radius: 6px 6px 0 0; margin-bottom: 4px; padding-bottom: 8px; }
+.aux-select-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.aux-select-name { flex: 1; }
+.aux-select-count { font-size: 11px; color: #888; font-variant-numeric: tabular-nums; }

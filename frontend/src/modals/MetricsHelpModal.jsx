@@ -16,16 +16,25 @@ export default function MetricsHelpModal({ onClose }) {
         <section>
           <h3>Productive Hrs %</h3>
           <div className="metrics-formula">
-            Productive Hrs % = Productive time ÷ (Login hours − Break allowance) × 100
+            Productive Hrs % = (Expected hours − Non-productive) ÷ Expected hours × 100
+            <br />
+            Expected hours = Login hours − Break allowance
+            <br />
+            Non-productive = Idle + Bio Break + Lunch/Break beyond the break allowance
           </div>
           <ul>
-            <li><strong>Productive time</strong> - Production, Admin, Adhoc, Coaching, Meeting and Training.</li>
+            <li>
+              <strong>Non-productive</strong> - all Idle and Bio Break time, plus any Lunch + Break time (combined)
+              over the break allowance below. Taking a shorter lunch or break earns nothing extra, so it can't make
+              up for Idle time.
+            </li>
             <li>
               <strong>Login hours</strong> - all aux time logged <em>inside</em> the agent's scheduled hours, so it can
               never be more than the schedule. Overtime only counts once it has been added to the schedule.
             </li>
             <li>
-              <strong>Break allowance</strong> - based on the login hours:
+              <strong>Break allowance</strong> - the combined Lunch + Break time allowed, based on the login hours.
+              It is taken off the login hours to get Expected hours:
               <table className="metrics-help-colors" style={{ margin: '6px 0' }}>
                 <thead><tr><th>Login hours</th><th>Allowance</th></tr></thead>
                 <tbody>
@@ -36,22 +45,29 @@ export default function MetricsHelpModal({ onClose }) {
                 </tbody>
               </table>
             </li>
-            <li>Never shown above 100%. With no schedule loaded for the day it shows <strong>N/A</strong> - the time is kept and is calculated as soon as a schedule is added.</li>
+            <li>Between 0% and 100%. With no schedule loaded for the day it shows <strong>N/A</strong> - the time is kept and is calculated as soon as a schedule is added.</li>
           </ul>
           <div className="metrics-example">
             <div className="metrics-example-title">Example - full 9h shift</div>
             Shift 8:00 AM - 5:00 PM. Inside it the agent logs Production 6.5h, Meeting 0.5h, Lunch 1h, Break 0.5h, Idle 0.5h (9h in total).
-            <div className="metrics-calc">(6.5 + 0.5) ÷ (9 − 1) = 7 ÷ 8 = <strong>87.5%</strong></div>
+            <div className="metrics-calc">Expected = 9 − 1 = 8h · Non-productive = 0.5 Idle + 0.5 Lunch/Break over the 1h allowance = 1h</div>
+            <div className="metrics-calc">(8 − 1) ÷ 8 = <strong>87.5%</strong></div>
+          </div>
+          <div className="metrics-example" style={{ marginTop: 8 }}>
+            <div className="metrics-example-title">Example - short lunch doesn't cover Idle</div>
+            Same 9h shift: Production 8h, Lunch 0.5h, Idle 0.5h.
+            <div className="metrics-calc">Non-productive = 0.5 Idle (the 0.5h of lunch not taken earns nothing)</div>
+            <div className="metrics-calc">(8 − 0.5) ÷ 8 = <strong>93.8%</strong></div>
           </div>
           <div className="metrics-example" style={{ marginTop: 8 }}>
             <div className="metrics-example-title">Example - stayed late without overtime</div>
             Same 9h shift, but the agent stays logged in until 7:00 PM. Only the 9 scheduled hours count, so the
             allowance stays 1h and the extra 2 hours are left out of both sides. If 2h of overtime had been added to
-            the schedule, login hours would be 11h and the allowance 1.5h: 11 − 1.5 = 9.5h denominator.
+            the schedule, login hours would be 11h and the allowance 1.5h: 11 − 1.5 = 9.5 expected hours.
           </div>
           <div className="metrics-example" style={{ marginTop: 8 }}>
             <div className="metrics-example-title">Example - early in the shift</div>
-            2h in, all of it Production: 2 ÷ (2 − 0.5) would be 133%, so it shows <strong>100%</strong>.
+            2h in, all of it Production: expected = 2 − 0.5 = 1.5h, nothing non-productive, so (1.5 − 0) ÷ 1.5 = <strong>100%</strong>.
           </div>
         </section>
 
@@ -82,7 +98,7 @@ export default function MetricsHelpModal({ onClose }) {
           </p>
           <div className="metrics-example">
             <div className="metrics-example-title">Example</div>
-            Agent A: 7.2h productive ÷ 8h (90%). Agent B: 1h productive ÷ 2h (50%) - each after their own break allowance.
+            Agent A: (8 − 0.8) ÷ 8h expected (90%). Agent B: (2 − 1) ÷ 2h expected (50%).
             <div className="metrics-calc">(7.2 + 1) ÷ (8 + 2) = <strong>82%</strong> - not (90 + 50) ÷ 2 = 70%</div>
             Days without a schedule are left out of both numbers entirely instead of counting as 0%.
           </div>

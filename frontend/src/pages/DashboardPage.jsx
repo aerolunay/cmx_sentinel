@@ -140,21 +140,21 @@ export default function DashboardPage() {
     });
   }, [rows, groupFilter, agentFilter]);
 
-  // Productive Hrs % = summed productive hours ÷ summed productive
-  // base hours (each agent/day's login hours minus its break allowance,
-  // worked out server-side - see productiveHrs in reportRoutes.js).
+  // Productive Hrs % = summed (Expected - Non-productive) ÷ summed
+  // Expected, both worked out per agent/day server-side (see
+  // productiveHrs in reportRoutes.js).
   // Only agent/days WITH a schedule count; without one there's no
   // Productive Hrs %. Summing first, then dividing - not averaging
   // per-agent percentages - same as ReportsPage's monthly aggregation.
   function sumProductive(list) {
-    let productiveHours = 0;
-    let baseHours = 0;
+    let creditHours = 0;
+    let expectedHours = 0;
     for (const r of list) {
       if (!r.hasSchedule || r.productiveBaseHours == null) continue;
-      productiveHours += r.productiveHours || 0;
-      baseHours += r.productiveBaseHours;
+      creditHours += r.productiveCreditHours || 0;
+      expectedHours += r.productiveBaseHours;
     }
-    return baseHours > 0 ? (productiveHours / baseHours) * 100 : null;
+    return expectedHours > 0 ? (creditHours / expectedHours) * 100 : null;
   }
 
   // One point per day, all agents in the current filters together. Days

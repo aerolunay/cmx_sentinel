@@ -19,10 +19,12 @@ router.use(requireAuth);
 // trigger set, by explicit request.
 const PRODUCTIVE_AUX_CODES = ["Production", "Admin", "Adhoc", "Coaching", "Meeting", "Training"];
 
-// Productive Hrs % = productive time ÷ (login hours - break allowance),
-// where login hours is the time logged INSIDE the schedule - so it can
-// never exceed the scheduled hours, and overtime only counts once it's
-// been added to the schedule. The allowance grows with the login:
+// Productive Hrs % = (Expected - Non-productive) ÷ Expected.
+//
+// Expected = login hours - break allowance, where login hours is the
+// time logged INSIDE the schedule - so it can never exceed the scheduled
+// hours, and overtime only counts once it's been added to the schedule.
+// The allowance grows with the login:
 //   <= 6h: 0.5h   > 6h-9h: 1h   > 9h-12h: 1.5h   > 12h: 2h
 function breakAllowanceSeconds(loginSeconds) {
   const hours = loginSeconds / 3600;
@@ -32,15 +34,43 @@ function breakAllowanceSeconds(loginSeconds) {
   return 2 * 3600;
 }
 
+// Non-productive = Idle + Bio Break + Lunch/Break beyond that same
+// allowance (it's the combined Lunch + Break allowance). Working through
+// part of a lunch or break therefore earns nothing - it can't make up
+// for Idle time.
+//
 // Only for an agent/day WITH a schedule - without one there's no
-// Productive Hrs % at all (callers return null). baseSeconds is the
-// denominator, never below the productive time itself, so the % is
-// capped at 100 (early in a shift the allowance alone can push it over)
-// and dashboards/monthly totals can sum it and divide once.
-function productiveHrs(productiveSeconds, loginSeconds) {
-  if (loginSeconds <= 0) return { baseSeconds: 0, pct: null };
-  const baseSeconds = Math.max(loginSeconds - breakAllowanceSeconds(loginSeconds), productiveSeconds);
-  return { baseSeconds, pct: baseSeconds > 0 ? (productiveSeconds / baseSeconds) * 100 : 0 };
+// Productive Hrs % at all (callers return null). `auxSeconds` is the
+// counted (inside-schedule) time per aux code, `loginSeconds` its total.
+// creditSeconds (Expected - Non-productive, never below 0) and
+// expectedSeconds are exposed so dashboards/monthly totals can sum them
+// and divide once.
+function productiveHrs(auxSeconds, loginSeconds) {
+  const allowanceSeconds = loginSeconds > 0 ? breakAllowanceSeconds(loginSeconds) : 0;
+  const lunchBreakSeconds = (auxSeconds.Lunch || 0) + (auxSeconds.Break || 0);
+  const excessBreakSeconds = Math.max(0, lunchBreakSeconds - allowanceSeconds);
+  const nonProductiveSeconds = (auxSeconds.Idle || 0) + (auxSeconds.BioBreak || 0) + excessBreakSeconds;
+  const result = {
+    allowanceSeconds,
+    expectedSeconds: 0,
+    nonProductiveSeconds,
+    excessBreakSeconds,
+    creditSeconds: 0,
+    pct: null,
+  };
+  if (loginSeconds <= 0) return result;
+
+  const expectedSeconds = loginSeconds - result.allowanceSeconds;
+  if (expectedSeconds <= 0) {
+    // Logged in for no longer than the allowance itself - nothing to
+    // measure against, so it's all or nothing.
+    result.pct = nonProductiveSeconds > 0 ? 0 : 100;
+    return result;
+  }
+  result.expectedSeconds = expectedSeconds;
+  result.creditSeconds = Math.max(0, expectedSeconds - nonProductiveSeconds);
+  result.pct = (result.creditSeconds / expectedSeconds) * 100;
+  return result;
 }
 
 // _est columns and agent_schedules are plain Eastern wall-clock values,
@@ -354,7 +384,7 @@ router.get("/efficiency", async (req, res) => {
       const adherentSeconds = totalSeconds + creditedSeconds;
       // No schedule, no Productive Hrs % - the aux rows are still
       // returned, so it appears on its own once a schedule is added.
-      const productive = entry.hasSchedule ? productiveHrs(productiveSeconds, totalSeconds) : null;
+      const productive = entry.hasSchedule ? productiveHrs(auxSeconds, totalSeconds) : null;
 
       return {
         date: entry.date,
@@ -370,7 +400,9 @@ router.get("/efficiency", async (req, res) => {
         // Productive Hrs % and its two sides - the hours are exposed so
         // dashboard/monthly totals can sum them and divide once.
         productiveHours: productiveSeconds / 3600,
-        productiveBaseHours: productive ? productive.baseSeconds / 3600 : null,
+        productiveBaseHours: productive ? productive.expectedSeconds / 3600 : null, // Expected
+        productiveCreditHours: productive ? productive.creditSeconds / 3600 : null, // Expected - Non-productive
+        nonProductiveHours: productive ? productive.nonProductiveSeconds / 3600 : null,
         efficiencyPct: productive ? productive.pct : null,
         // Only meaningful once a schedule exists - null (not 0) when
         // it doesn't, so the frontend can render "N/A" instead of a
@@ -675,7 +707,8 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       0
     );
     const loggedSeconds = [...auxTotals.values()].reduce((sum, t) => sum + t.loggedSeconds, 0);
-    const productive = hasSchedule ? productiveHrs(productiveSeconds, countedSeconds) : null;
+    const countedAuxSeconds = Object.fromEntries([...auxTotals].map(([code, t]) => [code, t.countedSeconds]));
+    const productive = hasSchedule ? productiveHrs(countedAuxSeconds, countedSeconds) : null;
 
     return {
       agentId: cur.agent_id,
@@ -709,8 +742,10 @@ async function loadLiveAgents(req, onlyAgentId = null) {
         loggedSeconds: Math.round(loggedSeconds),
         countedSeconds: Math.round(countedSeconds),
         productiveSeconds: Math.round(productiveSeconds),
-        breakAllowanceSeconds: productive && countedSeconds > 0 ? breakAllowanceSeconds(countedSeconds) : null,
-        productiveBaseSeconds: productive ? Math.round(productive.baseSeconds) : null,
+        breakAllowanceSeconds: productive && countedSeconds > 0 ? productive.allowanceSeconds : null,
+        expectedSeconds: productive && countedSeconds > 0 ? Math.round(countedSeconds - productive.allowanceSeconds) : null,
+        nonProductiveSeconds: productive ? Math.round(productive.nonProductiveSeconds) : null,
+        excessBreakSeconds: productive ? Math.round(productive.excessBreakSeconds) : null,
         creditedGapSeconds: Math.round(creditedGapSeconds),
         adherentSeconds: Math.round(adherentSeconds),
         scheduledSeconds: hasSchedule ? Math.round(scheduledSeconds) : null,
