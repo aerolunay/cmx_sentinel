@@ -462,8 +462,9 @@ router.get("/hourly-aux", async (req, res) => {
   }
 });
 
-// Agents currently logged in to the desktop app, with their current aux
-// and live efficiency/adherence for the shift they're on - optionally
+// Agents currently logged in to the desktop app (plus those who logged
+// out earlier today, as aux "LoggedOut"), with their current aux and
+// live Productive Hrs/adherence for the shift they're on - optionally
 // narrowed to one agent. "The shift" is the Eastern calendar day their
 // current login session started on, so an overnight shift keeps
 // counting past midnight instead of resetting. Same rules as
@@ -519,6 +520,54 @@ async function loadLiveAgents(req, onlyAgentId = null) {
   for (const row of openRows) {
     if (!current.has(row.agent_id)) current.set(row.agent_id, row);
   }
+
+  // Agents who were on today (Eastern) but aren't logged in now - their
+  // last closed segment ended today and nothing later is open. They're
+  // listed as "LoggedOut", timed from that logout, with the stats of the
+  // shift they logged out of. event_id is null so no event is treated
+  // as the live one below.
+  const loggedOutConditions = [
+    "ae.ended_at_est >= ?",
+    `NOT EXISTS (SELECT 1 FROM aux_events later
+                 WHERE later.agent_id = ae.agent_id AND later.ended_at_est > ae.ended_at_est)`,
+  ];
+  const loggedOutParams = [`${nowEst.slice(0, 10)} 00:00:00`];
+  if (scopedGroupIds !== null) {
+    loggedOutConditions.push(`a.group_id IN (${scopedGroupIds.map(() => "?").join(",")})`);
+    loggedOutParams.push(...scopedGroupIds);
+  }
+  if (onlyAgentId) {
+    loggedOutConditions.push("ae.agent_id = ?");
+    loggedOutParams.push(onlyAgentId);
+  }
+  const [loggedOutRows] = await db.query(
+    `SELECT ae.agent_id, a.display_name, a.group_id, g.group_name,
+            DATE_FORMAT(ae.started_at_est, '${EST_FORMAT}') AS started_est,
+            DATE_FORMAT(ae.ended_at_est, '${EST_FORMAT}') AS ended_est,
+            DATE_FORMAT((
+              SELECT MIN(x.started_at_est) FROM aux_events x
+              WHERE x.agent_id = ae.agent_id AND x.login_session_id = ae.login_session_id
+            ), '${EST_FORMAT}') AS session_started_est
+     FROM aux_events ae
+     JOIN agents a ON a.agent_id = ae.agent_id
+     LEFT JOIN agent_groups g ON g.group_id = a.group_id
+     WHERE ${loggedOutConditions.join(" AND ")}`,
+    loggedOutParams
+  );
+  for (const row of loggedOutRows) {
+    if (current.has(row.agent_id)) continue;
+    current.set(row.agent_id, {
+      event_id: null,
+      agent_id: row.agent_id,
+      display_name: row.display_name,
+      group_id: row.group_id,
+      group_name: row.group_name,
+      aux_code: "LoggedOut",
+      aux_started_est: row.ended_est,
+      session_started_est: row.session_started_est || row.started_est,
+    });
+  }
+
   if (current.size === 0) {
     return [];
   }
@@ -688,7 +737,7 @@ router.get("/live-agents/:agentId", async (req, res) => {
   try {
     const [agent] = await loadLiveAgents(req, req.params.agentId);
     if (!agent) {
-      return res.status(404).json({ error: "This agent is no longer logged in." });
+      return res.status(404).json({ error: "No desktop activity for this agent today." });
     }
     res.json(agent);
   } catch (err) {

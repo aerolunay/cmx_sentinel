@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { AUX_COLORS, getEfficiencyColor, getAdherenceColor, formatDuration } from '../utils/metrics.js';
+import {
+  AUX_COLORS, getEfficiencyColor, getAdherenceColor, formatDuration, formatAuxLabel, liveStateRank,
+} from '../utils/metrics.js';
 import LiveAgentDetailModal from '../modals/LiveAgentDetailModal.jsx';
 
 const REFRESH_MS = 5000;
 
-// Agents currently logged in to the Sentinel desktop app. Reloaded from
+// Agents on the Sentinel desktop app today - logged in, or logged out
+// earlier today (aux "LoggedOut") - sorted by state (see
+// LIVE_STATE_ORDER) and then longest in that state first. Reloaded from
 // the server every 5s (paused while the browser tab is hidden, so idle
 // tabs don't keep querying); in between, the aux duration counts up
 // locally from when the data was fetched so it doesn't sit frozen.
@@ -49,19 +53,28 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
     };
   }, []);
 
-  const visibleAgents = useMemo(() => agents.filter((a) => {
-    if (groupFilter && String(a.groupId) !== groupFilter) return false;
-    if (agentFilter && String(a.agentId) !== agentFilter) return false;
-    return true;
-  }), [agents, groupFilter, agentFilter]);
+  const visibleAgents = useMemo(() => agents
+    .filter((a) => {
+      if (groupFilter && String(a.groupId) !== groupFilter) return false;
+      if (agentFilter && String(a.agentId) !== agentFilter) return false;
+      return true;
+    })
+    .sort((a, b) => liveStateRank(a.auxCode) - liveStateRank(b.auxCode)
+      || b.auxSeconds - a.auxSeconds
+      || a.displayName.localeCompare(b.displayName)), [agents, groupFilter, agentFilter]);
+  const loggedInCount = visibleAgents.filter((a) => a.auxCode !== 'LoggedOut').length;
 
   const elapsed = Math.max(0, Math.floor((now - fetchedAt) / 1000));
 
   return (
     <div className="dashboard-card live-agents">
       <h3>
-        Logged In Agents
-        {!loading && <span className="live-agents-count">{visibleAgents.length}</span>}
+        Live Agent Status
+        {!loading && (
+          <span className="live-agents-count" title={`${loggedInCount} logged in, ${visibleAgents.length - loggedInCount} logged out`}>
+            {loggedInCount} logged in
+          </span>
+        )}
       </h3>
 
       {error && <div className="error">{error}</div>}
@@ -69,7 +82,7 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
       {loading ? (
         <p style={{ fontSize: 14 }}>Loading...</p>
       ) : visibleAgents.length === 0 ? (
-        <p style={{ fontSize: 14, color: '#999' }}>No agents logged in right now.</p>
+        <p style={{ fontSize: 14, color: '#999' }}>No agent activity yet today.</p>
       ) : (
         <div className="live-agents-scroll">
           <table>
@@ -95,7 +108,7 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
                   </td>
                   <td>
                     <span className="aux-badge" style={{ background: AUX_COLORS[a.auxCode] || '#6b7280' }}>
-                      {a.auxCode}
+                      {formatAuxLabel(a.auxCode)}
                     </span>
                   </td>
                   <td style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDuration(a.auxSeconds + elapsed)}</td>

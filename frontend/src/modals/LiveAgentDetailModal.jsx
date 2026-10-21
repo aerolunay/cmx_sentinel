@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { AUX_COLORS, getEfficiencyColor, getAdherenceColor, formatDuration } from '../utils/metrics.js';
+import { AUX_COLORS, getEfficiencyColor, getAdherenceColor, formatDuration, formatAuxLabel } from '../utils/metrics.js';
 
 const REFRESH_MS = 5000;
 
@@ -84,8 +84,8 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
 
             <div className="live-detail-tiles">
               <div className="live-detail-tile">
-                <div className="live-detail-label">Current Aux</div>
-                <span className="aux-badge" style={{ background: AUX_COLORS[agent.auxCode] || '#6b7280' }}>{agent.auxCode}</span>
+                <div className="live-detail-label">Current State</div>
+                <span className="aux-badge" style={{ background: AUX_COLORS[agent.auxCode] || '#6b7280' }}>{formatAuxLabel(agent.auxCode)}</span>
                 <div className="live-detail-small">{formatDuration(agent.auxSeconds)}</div>
               </div>
               <div className="live-detail-tile">
@@ -198,7 +198,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
                 {d.aux.map((a) => (
                   <tr key={a.auxCode}>
                     <td>
-                      <span className="aux-badge" style={{ background: AUX_COLORS[a.auxCode] || '#6b7280' }}>{a.auxCode}</span>
+                      <span className="aux-badge" style={{ background: AUX_COLORS[a.auxCode] || '#6b7280' }}>{formatAuxLabel(a.auxCode)}</span>
                       {a.isProductive && <span className="live-detail-small"> productive</span>}
                     </td>
                     <td>{formatDuration(a.loggedSeconds)}</td>
