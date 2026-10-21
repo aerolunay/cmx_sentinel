@@ -64,6 +64,25 @@ export default function MetricsHelpModal({ onClose }) {
         </section>
 
         <section>
+          <h3>Live view hourly charts</h3>
+          <p>
+            These use all recorded aux time in each clock hour, scheduled or not, so they can differ from the
+            Today cards, which only count time inside schedules.
+          </p>
+          <ul>
+            <li><strong>Average aux time per agent</strong> - each aux code's total minutes in the hour ÷ the number of agents who recorded any time in that hour.</li>
+            <li><strong>Average Productive Hrs %</strong> - productive minutes ÷ all recorded minutes in the hour, across those agents.</li>
+          </ul>
+          <div className="metrics-example">
+            <div className="metrics-example-title">Example - 9 AM to 10 AM</div>
+            3 agents record Production 150m, Break 15m and Idle 15m between them.
+            <div className="metrics-calc">Production 150 ÷ 3 = <strong>50m</strong> · Break 15 ÷ 3 = <strong>5m</strong> · Idle 15 ÷ 3 = <strong>5m</strong></div>
+            <div className="metrics-calc">Productive Hrs % = 150 ÷ 180 = <strong>83.3%</strong></div>
+            The current hour is still in progress, so its bar is shorter until the hour ends.
+          </div>
+        </section>
+
+        <section>
           <h3>Colors</h3>
           <table className="metrics-help-colors">
             <thead>
