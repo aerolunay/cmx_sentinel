@@ -27,11 +27,10 @@ function formatHourLabel(hour) {
   return `${h12} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
-function formatHoursAsDuration(hours) {
-  const totalMinutes = Math.round(hours * 60);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+function formatMinutes(minutes) {
+  const whole = Math.floor(minutes);
+  const seconds = Math.round((minutes - whole) * 60);
+  return seconds > 0 ? `${whole}m ${seconds}s` : `${whole}m`;
 }
 
 const selectStyle = { padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 };
@@ -198,38 +197,56 @@ export default function DashboardPage() {
     return hasAnySchedule && scheduledHours > 0 ? (scheduledLoggedHours / scheduledHours) * 100 : null;
   }, [filteredRows]);
 
-  // Live view: recorded aux time per hour of today, one stacked bar per
-  // hour. The hours shown run from the first to the last hour anything
-  // was recorded in (empty hours in between kept so the axis is even),
-  // and only aux codes that actually appear get a series.
+  // Live view: recorded aux time per hour of today. The hours shown run
+  // from the first to the last hour anything was recorded in (empty
+  // hours in between kept so the axis is even), and only aux codes that
+  // actually appear get a series.
   const filteredHourly = useMemo(() => hourlyRows.filter((r) => {
     if (groupFilter && String(r.groupId) !== groupFilter) return false;
     if (agentFilter && String(r.agentId) !== agentFilter) return false;
     return true;
   }), [hourlyRows, groupFilter, agentFilter]);
 
+  // Per hour: the AVERAGE minutes per agent in each aux code - each
+  // code's total divided by the number of agents who recorded any time
+  // in that hour, so a full hour stacks to at most 60m however many
+  // agents are on. productivePct is that hour's Productive Hrs % - sum
+  // first, then divide, same as everywhere else.
   const { hourlyAux, hourlyCodes } = useMemo(() => {
     if (filteredHourly.length === 0) return { hourlyAux: [], hourlyCodes: [] };
     const byHour = new Map();
     const codes = new Set();
     for (const r of filteredHourly) {
-      if (!byHour.has(r.hour)) byHour.set(r.hour, {});
+      if (!byHour.has(r.hour)) byHour.set(r.hour, { seconds: {}, agents: new Set() });
       const hour = byHour.get(r.hour);
-      hour[r.auxCode] = (hour[r.auxCode] || 0) + r.seconds / 3600;
+      hour.seconds[r.auxCode] = (hour.seconds[r.auxCode] || 0) + r.seconds;
+      hour.agents.add(r.agentId);
       codes.add(r.auxCode);
     }
     const hours = [...byHour.keys()];
     const data = [];
     for (let h = Math.min(...hours); h <= Math.max(...hours); h++) {
-      const entry = { hour: formatHourLabel(h) };
-      for (const [code, value] of Object.entries(byHour.get(h) || {})) entry[code] = Number(value.toFixed(3));
+      const entry = { hour: formatHourLabel(h), agents: 0, productivePct: null };
+      const bucket = byHour.get(h);
+      if (bucket) {
+        const agentCount = bucket.agents.size;
+        let totalSeconds = 0;
+        let productiveSeconds = 0;
+        for (const [code, seconds] of Object.entries(bucket.seconds)) {
+          entry[code] = Number((seconds / 60 / agentCount).toFixed(2));
+          totalSeconds += seconds;
+          if (PRODUCTIVE_AUX_CODES.includes(code)) productiveSeconds += seconds;
+        }
+        entry.agents = agentCount;
+        entry.productivePct = totalSeconds > 0 ? Number(((productiveSeconds / totalSeconds) * 100).toFixed(1)) : null;
+      }
       data.push(entry);
     }
     // Same order as the aux breakdown chart, unknown codes last.
-    const ordered = [...codes].sort((a, b) => {
-      const ia = AUX_CODES.indexOf(a);
-      const ib = AUX_CODES.indexOf(b);
-      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    const ordered = [...codes].sort((x, y) => {
+      const ix = AUX_CODES.indexOf(x);
+      const iy = AUX_CODES.indexOf(y);
+      return (ix === -1 ? 99 : ix) - (iy === -1 ? 99 : iy);
     });
     return { hourlyAux: data, hourlyCodes: ordered };
   }, [filteredHourly]);
@@ -361,25 +378,58 @@ export default function DashboardPage() {
               </div>
 
               {isLive ? (
-              <div className="dashboard-card">
-                <h3>Aux Time by Hour (Today)</h3>
-                {hourlyAux.length === 0 ? (
-                  <p style={{ fontSize: 14, color: '#999' }}>No aux time recorded yet today.</p>
-                ) : (
-                  <ResponsiveContainer width="100%" height={320}>
-                    <BarChart data={hourlyAux} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                      <XAxis dataKey="hour" fontSize={12} />
-                      <YAxis fontSize={12} tickFormatter={(v) => `${v}h`} />
-                      <Tooltip formatter={(value) => formatHoursAsDuration(value)} />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      {hourlyCodes.map((code) => (
-                        <Bar key={code} dataKey={code} stackId="aux" name={code} fill={AUX_COLORS[code] || '#9ca3af'} />
-                      ))}
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
+                <>
+                  <div className="dashboard-card">
+                    <h3>Average Aux Time per Agent by Hour (Today)</h3>
+                    {hourlyAux.length === 0 ? (
+                      <p style={{ fontSize: 14, color: '#999' }}>No aux time recorded yet today.</p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={320}>
+                        <BarChart data={hourlyAux} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                          <XAxis dataKey="hour" fontSize={12} />
+                          <YAxis fontSize={12} domain={[0, 60]} ticks={[0, 15, 30, 45, 60]} tickFormatter={(v) => `${v}m`} />
+                          <Tooltip
+                            formatter={(value) => formatMinutes(value)}
+                            labelFormatter={(label, payload) => {
+                              const agents = payload?.[0]?.payload?.agents;
+                              return agents ? `${label} · ${agents} agent${agents === 1 ? '' : 's'}` : label;
+                            }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: 12 }} />
+                          {hourlyCodes.map((code) => (
+                            <Bar key={code} dataKey={code} stackId="aux" name={code} fill={AUX_COLORS[code] || '#9ca3af'} />
+                          ))}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+
+                  <div className="dashboard-card">
+                    <h3>Average Productive Hrs % by Hour (Today)</h3>
+                    {hourlyAux.length === 0 ? (
+                      <p style={{ fontSize: 14, color: '#999' }}>No aux time recorded yet today.</p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <LineChart data={hourlyAux} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                          <XAxis dataKey="hour" fontSize={12} />
+                          <YAxis domain={[0, 100]} unit="%" fontSize={12} />
+                          <Tooltip formatter={(value) => `${value}%`} />
+                          <Line
+                            type="monotone"
+                            dataKey="productivePct"
+                            stroke="#1e3a8a"
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                            connectNulls
+                            name="Productive Hrs %"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </>
               ) : (
                 <>
                 <div className="dashboard-card">
