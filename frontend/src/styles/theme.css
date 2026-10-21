@@ -43,7 +43,9 @@ header {
 .sidebar a:hover { background: #f3f4f6; }
 .sidebar a.active { background: #eef1f6; color: #1a2b4a; font-weight: 600; border-left-color: #1a2b4a; }
 
-main { flex: 1; padding: 28px; }
+/* min-width: 0 stops wide content (e.g. the reports table) from
+   stretching the page past the header - it scrolls in its own box. */
+main { flex: 1; padding: 28px; min-width: 0; }
 
 table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #eee; font-size: 14px; }
@@ -330,3 +332,16 @@ label { margin-right: 6px; }
 .aux-select-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 .aux-select-name { flex: 1; }
 .aux-select-count { font-size: 11px; color: #888; font-variant-numeric: tabular-nums; }
+
+/* Reports table - ~21 columns, so compact type and padding to fit the
+   page width; headers wrap instead of widening their columns. Scrolls
+   inside its own box on screens too narrow even for this. */
+.report-table-wrap { overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+.report-table { box-shadow: none; }
+.report-table th, .report-table td {
+  padding: 6px 6px; font-size: 11.5px; line-height: 1.3; vertical-align: top;
+}
+.report-table th { font-size: 11px; white-space: normal; overflow-wrap: break-word; }
+.report-table td { font-variant-numeric: tabular-nums; }
+.report-time { white-space: nowrap; }
+.report-time-date { font-size: 10px; color: #888; white-space: nowrap; }

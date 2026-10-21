@@ -21,15 +21,22 @@ function formatDailyDate(dateStr) {
 }
 
 // "8:05 AM" for an Eastern "YYYY-MM-DD HH:MM:SS" string, with the date
-// added when it isn't the row's own day (an overnight shift ending the
-// next morning) - string parsing only, same reason as formatDailyDate.
-function formatTimeOfDay(estString, rowDate) {
-  const [datePart, timePart] = estString.split(' ');
+// on a second line when it isn't the row's own day (an overnight shift
+// ending the next morning) - string parsing only, same reason as
+// formatDailyDate.
+function TimeOfDay({ value, rowDate }) {
+  if (!value) return <em style={{ color: '#999' }}>-</em>;
+  const [datePart, timePart] = value.split(' ');
   const [h, m] = timePart.split(':').map(Number);
   const time = `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
-  if (datePart === rowDate) return time;
+  if (datePart === rowDate) return <span className="report-time">{time}</span>;
   const [, mo, d] = datePart.split('-').map(Number);
-  return `${time} (${MONTH_NAMES[mo - 1]} ${d})`;
+  return (
+    <>
+      <span className="report-time">{time}</span>
+      <div className="report-time-date">{MONTH_NAMES[mo - 1]} {d}</div>
+    </>
+  );
 }
 
 function formatMonthLabel(monthStr) {
@@ -285,8 +292,8 @@ export default function ReportsPage() {
       )}
 
       {displayRows.length > 0 && (
-        <div style={{ overflowX: 'auto' }}>
-          <table>
+        <div className="report-table-wrap">
+          <table className="report-table">
             <thead>
               <tr>
                 <th>{viewMode === 'monthly' ? 'Month' : 'Date'}</th>
@@ -315,13 +322,13 @@ export default function ReportsPage() {
                   <td>{r.groupName || <em style={{ color: '#999' }}>none</em>}</td>
                   {viewMode === 'daily' && (
                     <>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.scheduledStart ? formatTimeOfDay(r.scheduledStart, r.date) : <em style={{ color: '#999' }}>-</em>}</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.scheduledEnd ? formatTimeOfDay(r.scheduledEnd, r.date) : <em style={{ color: '#999' }}>-</em>}</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.actualStart ? formatTimeOfDay(r.actualStart, r.date) : <em style={{ color: '#999' }}>-</em>}</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
+                      <td><TimeOfDay value={r.scheduledStart} rowDate={r.date} /></td>
+                      <td><TimeOfDay value={r.scheduledEnd} rowDate={r.date} /></td>
+                      <td><TimeOfDay value={r.actualStart} rowDate={r.date} /></td>
+                      <td>
                         {r.stillLoggedIn
                           ? <em style={{ color: '#166534' }}>Still logged in</em>
-                          : r.actualEnd ? formatTimeOfDay(r.actualEnd, r.date) : <em style={{ color: '#999' }}>-</em>}
+                          : <TimeOfDay value={r.actualEnd} rowDate={r.date} />}
                       </td>
                     </>
                   )}
