@@ -20,6 +20,18 @@ function formatDailyDate(dateStr) {
   return `${MONTH_NAMES[m - 1]} ${d}, ${y}`;
 }
 
+// "8:05 AM" for an Eastern "YYYY-MM-DD HH:MM:SS" string, with the date
+// added when it isn't the row's own day (an overnight shift ending the
+// next morning) - string parsing only, same reason as formatDailyDate.
+function formatTimeOfDay(estString, rowDate) {
+  const [datePart, timePart] = estString.split(' ');
+  const [h, m] = timePart.split(':').map(Number);
+  const time = `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+  if (datePart === rowDate) return time;
+  const [, mo, d] = datePart.split('-').map(Number);
+  return `${time} (${MONTH_NAMES[mo - 1]} ${d})`;
+}
+
 function formatMonthLabel(monthStr) {
   const [y, m] = monthStr.split('-').map(Number);
   return `${MONTH_NAMES[m - 1]} ${y}`;
@@ -128,16 +140,22 @@ function getAdherenceColor(pct) {
   return '#b91c1c'; // red
 }
 
-function toCsv(rows) {
-  const headers = ['Date', 'Agent', 'Agent ID', 'Group', ...AUX_CODES, 'Total Hours', 'Productive Hrs %', 'Scheduled Hours', 'Adherence %'];
+// Daily rows also get the scheduled/actual start and end times.
+function toCsv(rows, isDaily) {
+  const timeHeaders = isDaily ? ['Scheduled Start', 'Scheduled End', 'Actual Start', 'Actual End'] : [];
+  const headers = ['Date', 'Agent', 'Agent ID', 'Group', ...timeHeaders, ...AUX_CODES, 'Total Hours', 'Productive Hrs %', 'Scheduled Hours', 'Adherence %'];
   const lines = [headers.join(',')];
 
   for (const r of rows) {
+    const times = isDaily
+      ? [r.scheduledStart || '', r.scheduledEnd || '', r.actualStart || '', r.stillLoggedIn ? 'Still logged in' : r.actualEnd || '']
+      : [];
     const line = [
       r.date,
       `"${r.displayName}"`,
       r.agentId,
       `"${r.groupName || ''}"`,
+      ...times,
       ...AUX_CODES.map((code) => (r.auxHours[code] || 0).toFixed(2)),
       r.totalHours.toFixed(2),
       r.efficiencyPct == null ? '' : r.efficiencyPct.toFixed(2),
@@ -205,7 +223,7 @@ export default function ReportsPage() {
   }, [rows, viewMode]);
 
   function handleExportCsv() {
-    const csv = toCsv(displayRows);
+    const csv = toCsv(displayRows, viewMode === 'daily');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -274,6 +292,14 @@ export default function ReportsPage() {
                 <th>{viewMode === 'monthly' ? 'Month' : 'Date'}</th>
                 <th>Agent</th>
                 <th>Group</th>
+                {viewMode === 'daily' && (
+                  <>
+                    <th>Scheduled Start</th>
+                    <th>Scheduled End</th>
+                    <th>Actual Start</th>
+                    <th>Actual End</th>
+                  </>
+                )}
                 {AUX_CODES.map((code) => <th key={code}>{code}</th>)}
                 <th>Total Hours</th>
                 <th>Productive Hrs %</th>
@@ -287,6 +313,18 @@ export default function ReportsPage() {
                   <td>{viewMode === 'monthly' ? formatMonthLabel(r.date) : formatDailyDate(r.date)}</td>
                   <td>{r.displayName}</td>
                   <td>{r.groupName || <em style={{ color: '#999' }}>none</em>}</td>
+                  {viewMode === 'daily' && (
+                    <>
+                      <td style={{ whiteSpace: 'nowrap' }}>{r.scheduledStart ? formatTimeOfDay(r.scheduledStart, r.date) : <em style={{ color: '#999' }}>-</em>}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{r.scheduledEnd ? formatTimeOfDay(r.scheduledEnd, r.date) : <em style={{ color: '#999' }}>-</em>}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{r.actualStart ? formatTimeOfDay(r.actualStart, r.date) : <em style={{ color: '#999' }}>-</em>}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {r.stillLoggedIn
+                          ? <em style={{ color: '#166534' }}>Still logged in</em>
+                          : r.actualEnd ? formatTimeOfDay(r.actualEnd, r.date) : <em style={{ color: '#999' }}>-</em>}
+                      </td>
+                    </>
+                  )}
                   {AUX_CODES.map((code) => (
                     <td key={code}>{formatHours(r.auxHours[code])}</td>
                   ))}

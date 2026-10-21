@@ -329,6 +329,53 @@ router.get("/efficiency", async (req, res) => {
       }
     }
 
+    // Query 6 - scheduled and actual start/end per (agent, day), shown in
+    // the daily report. Scheduled = earliest start / latest end of that
+    // day's schedule windows. Actual = first login / last logout of the
+    // desktop logins that STARTED on that day (same "the shift is the
+    // day the login started" rule as the live view, so an overnight
+    // shift ends the morning after). The event range is widened a day
+    // either side so those logins are seen whole; actualEnd is null
+    // while the agent is still logged in.
+    const scheduledTimes = new Map(); // "agentId|date" -> { start, end }
+    for (const w of windowRows) {
+      const key = `${w.agent_id}|${w.shift_date}`;
+      const t = scheduledTimes.get(key);
+      if (!t) scheduledTimes.set(key, { start: w.start_est, end: w.end_est });
+      else {
+        if (w.start_est < t.start) t.start = w.start_est;
+        if (w.end_est > t.end) t.end = w.end_est;
+      }
+    }
+
+    const actualFilter = buildConditions("DATE(ae.started_at_est)", {
+      ...filters,
+      dateFrom: DateTime.fromISO(dateFrom).minus({ days: 1 }).toISODate(),
+      dateTo: DateTime.fromISO(dateTo).plus({ days: 1 }).toISODate(),
+    });
+    const [loginRows] = await db.query(
+      `SELECT ae.agent_id,
+              DATE_FORMAT(MIN(ae.started_at_est), '${EST_FORMAT}') AS start_est,
+              DATE_FORMAT(MAX(ae.ended_at_est), '${EST_FORMAT}') AS end_est,
+              MAX(CASE WHEN ${RUNNING_SEGMENT_SQL} THEN 1 ELSE 0 END) AS is_active
+       FROM aux_events ae
+       JOIN agents a ON a.agent_id = ae.agent_id
+       WHERE ${actualFilter.conditions.join(" AND ")}
+       GROUP BY ae.agent_id, COALESCE(ae.login_session_id, CONCAT('event-', ae.event_id))`,
+      [openCutoffEst, ...actualFilter.params]
+    );
+    const actualTimes = new Map(); // "agentId|date" -> { start, end, active }
+    for (const row of loginRows) {
+      const day = row.start_est.slice(0, 10);
+      if (day < dateFrom || day > dateTo) continue;
+      const key = `${row.agent_id}|${day}`;
+      const t = actualTimes.get(key) || { start: row.start_est, end: null, active: false };
+      if (row.start_est < t.start) t.start = row.start_est;
+      if (row.end_est && (!t.end || row.end_est > t.end)) t.end = row.end_est;
+      if (Number(row.is_active)) t.active = true;
+      actualTimes.set(key, t);
+    }
+
     // Merge all three into one (agent, day) map. Every key present in
     // scheduleRows has a real schedule for that day (even if
     // overlapRows has nothing for it, e.g. the agent never logged in
@@ -385,6 +432,8 @@ router.get("/efficiency", async (req, res) => {
       // No schedule, no Productive Hrs % - the aux rows are still
       // returned, so it appears on its own once a schedule is added.
       const productive = entry.hasSchedule ? productiveHrs(auxSeconds, totalSeconds) : null;
+      const scheduled = scheduledTimes.get(`${entry.agentId}|${entry.date}`);
+      const actual = actualTimes.get(`${entry.agentId}|${entry.date}`);
 
       return {
         date: entry.date,
@@ -416,6 +465,13 @@ router.get("/efficiency", async (req, res) => {
         adherencePct: entry.hasSchedule && entry.scheduledSeconds > 0
           ? (adherentSeconds / entry.scheduledSeconds) * 100
           : null,
+        // Eastern "YYYY-MM-DD HH:MM:SS" strings (see Query 6), null when
+        // there's no schedule / no login that day.
+        scheduledStart: scheduled ? scheduled.start : null,
+        scheduledEnd: scheduled ? scheduled.end : null,
+        actualStart: actual ? actual.start : null,
+        actualEnd: actual && !actual.active ? actual.end : null,
+        stillLoggedIn: Boolean(actual && actual.active),
       };
     });
 
