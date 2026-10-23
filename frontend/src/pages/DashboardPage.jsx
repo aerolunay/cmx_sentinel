@@ -181,8 +181,8 @@ export default function DashboardPage() {
   // Same "sum first, then divide" approach, but only over days that
   // actually have a schedule loaded (hasSchedule: true) - a day
   // without one simply doesn't contribute to either side of the
-  // ratio, rather than being treated as 0% adherence. scheduledHours
-  // is only the scheduled time elapsed so far (see
+  // ratio, rather than being treated as 0% adherence. The denominator is
+  // elapsedScheduledHours - only the scheduled time elapsed so far (see
   // /api/reports/efficiency), so the rest of today and future days add
   // nothing to the denominator.
   const overallAdherence = useMemo(() => {
@@ -192,7 +192,7 @@ export default function DashboardPage() {
     for (const r of filteredRows) {
       if (!r.hasSchedule) continue;
       hasAnySchedule = true;
-      scheduledHours += r.scheduledHours || 0;
+      scheduledHours += r.elapsedScheduledHours ?? r.scheduledHours ?? 0;
       scheduledLoggedHours += r.adherentHours ?? r.totalHours; // includes credited reconnect gaps
     }
     return hasAnySchedule && scheduledHours > 0 ? (scheduledLoggedHours / scheduledHours) * 100 : null;
@@ -271,7 +271,7 @@ export default function DashboardPage() {
   }, [filteredRows]);
 
   const periodLabel = isLive ? 'Today' : range ? formatRangeLabel(range) : '';
-  const hasData = filteredRows.some((r) => r.totalHours > 0 || r.scheduledHours > 0);
+  const hasData = filteredRows.some((r) => r.totalHours > 0 || r.elapsedScheduledHours > 0);
 
   return (
     <>

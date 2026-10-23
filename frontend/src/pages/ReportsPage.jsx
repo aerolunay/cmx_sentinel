@@ -79,6 +79,7 @@ function aggregateMonthly(dailyRows) {
         productiveCreditHours: 0,
         productiveBaseHours: 0,
         scheduledHours: 0,
+        elapsedScheduledHours: 0,
         adherentHours: 0,
         hasAnySchedule: false,
       });
@@ -90,6 +91,7 @@ function aggregateMonthly(dailyRows) {
     if (r.hasSchedule) {
       entry.hasAnySchedule = true;
       entry.scheduledHours += r.scheduledHours || 0;
+      entry.elapsedScheduledHours += r.elapsedScheduledHours ?? r.scheduledHours ?? 0;
       entry.adherentHours += r.adherentHours ?? r.totalHours;
       if (r.productiveBaseHours != null) {
         entry.productiveCreditHours += r.productiveCreditHours || 0;
@@ -107,8 +109,8 @@ function aggregateMonthly(dailyRows) {
         efficiencyPct: entry.productiveBaseHours > 0
           ? (entry.productiveCreditHours / entry.productiveBaseHours) * 100
           : null,
-        adherencePct: entry.hasAnySchedule && entry.scheduledHours > 0
-          ? (entry.adherentHours / entry.scheduledHours) * 100
+        adherencePct: entry.hasAnySchedule && entry.elapsedScheduledHours > 0
+          ? (entry.adherentHours / entry.elapsedScheduledHours) * 100
           : null,
       };
     })
