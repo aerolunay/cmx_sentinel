@@ -204,14 +204,17 @@ router.get("/efficiency", async (req, res) => {
     // Query 2 - total SCHEDULED seconds per (agent, day), summed across
     // every shift_type row that day (e.g. Regular + OT both count
     // toward the same day's scheduled total). This alone is what tells
-    // us whether an (agent, day) HAS a schedule at all. Only the part of
-    // each window that has already started counts (capped at now), so a
-    // future day has a schedule but 0 scheduled seconds so far.
+    // us whether an (agent, day) HAS a schedule at all. scheduled_seconds
+    // is the full shift length (what the report shows); elapsed_seconds
+    // is only the part that has already started (capped at now) - the
+    // adherence denominator, so a future day or the rest of today's shift
+    // doesn't count against the agent yet.
     const scheduleFilter = buildConditions("s.shift_date", filters);
     const [scheduleRows] = await db.query(
       `SELECT a.agent_id, a.display_name, a.group_id, g.group_name,
               DATE_FORMAT(s.shift_date, '%Y-%m-%d') AS report_date,
-              SUM(GREATEST(0, TIMESTAMPDIFF(SECOND, s.scheduled_start, LEAST(s.scheduled_end, ?)))) AS scheduled_seconds
+              SUM(TIMESTAMPDIFF(SECOND, s.scheduled_start, s.scheduled_end)) AS scheduled_seconds,
+              SUM(GREATEST(0, TIMESTAMPDIFF(SECOND, s.scheduled_start, LEAST(s.scheduled_end, ?)))) AS elapsed_seconds
        FROM agent_schedules s
        JOIN agents a ON a.agent_id = s.agent_id
        LEFT JOIN agent_groups g ON g.group_id = a.group_id
@@ -395,6 +398,7 @@ router.get("/efficiency", async (req, res) => {
           groupName: row.group_name,
           hasSchedule: false,
           scheduledSeconds: 0,
+          elapsedScheduledSeconds: 0,
           legacyAuxSeconds: {},
           scheduledAuxSeconds: {},
         });
@@ -409,6 +413,7 @@ router.get("/efficiency", async (req, res) => {
       const entry = getEntry(row);
       entry.hasSchedule = true;
       entry.scheduledSeconds = Number(row.scheduled_seconds);
+      entry.elapsedScheduledSeconds = Number(row.elapsed_seconds);
     }
     for (const row of overlapRows) {
       getEntry(row).scheduledAuxSeconds[row.aux_code] = Number(row.overlap_seconds);
@@ -457,13 +462,16 @@ router.get("/efficiency", async (req, res) => {
         // it doesn't, so the frontend can render "N/A" instead of a
         // misleading 0%.
         scheduledHours: entry.hasSchedule ? entry.scheduledSeconds / 3600 : null,
+        // The part of the schedule that has started so far - the
+        // adherence denominator (equals scheduledHours once the shift is over).
+        elapsedScheduledHours: entry.hasSchedule ? entry.elapsedScheduledSeconds / 3600 : null,
         // Logged time within schedule plus credited reconnect gaps -
         // the numerator of adherencePct, exposed so monthly/dashboard
         // totals can sum it the same way.
         creditedGapHours: entry.hasSchedule ? creditedSeconds / 3600 : null,
         adherentHours: entry.hasSchedule ? adherentSeconds / 3600 : null,
-        adherencePct: entry.hasSchedule && entry.scheduledSeconds > 0
-          ? (adherentSeconds / entry.scheduledSeconds) * 100
+        adherencePct: entry.hasSchedule && entry.elapsedScheduledSeconds > 0
+          ? (adherentSeconds / entry.elapsedScheduledSeconds) * 100
           : null,
         // Eastern "YYYY-MM-DD HH:MM:SS" strings (see Query 6), null when
         // there's no schedule / no login that day.
