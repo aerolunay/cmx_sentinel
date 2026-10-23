@@ -172,7 +172,7 @@ export default function DashboardPage() {
       .sort((a, b) => a.date.localeCompare(b.date))
       .map((d) => ({
         day: formatDayShort(d.date), // ranges can span months, so "Oct 3" rather than a bare day number
-        productive: Number(d.pct.toFixed(1)),
+        productive: Number(d.pct.toFixed(2)),
       }));
   }, [filteredRows]);
 
@@ -240,7 +240,7 @@ export default function DashboardPage() {
           if (PRODUCTIVE_AUX_CODES.includes(code)) productiveSeconds += seconds;
         }
         entry.agents = agentCount;
-        entry.productivePct = totalSeconds > 0 ? Number(((productiveSeconds / totalSeconds) * 100).toFixed(1)) : null;
+        entry.productivePct = totalSeconds > 0 ? Number(((productiveSeconds / totalSeconds) * 100).toFixed(2)) : null;
       }
       data.push(entry);
     }
@@ -266,7 +266,7 @@ export default function DashboardPage() {
     const grandTotal = Object.values(totals).reduce((sum, h) => sum + h, 0);
     return AUX_CODES.map((code) => ({
       aux: code,
-      pct: grandTotal > 0 ? Number(((totals[code] / grandTotal) * 100).toFixed(1)) : 0,
+      pct: grandTotal > 0 ? Number(((totals[code] / grandTotal) * 100).toFixed(2)) : 0,
     }));
   }, [filteredRows]);
 
@@ -366,7 +366,7 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     <div style={{ fontSize: 48, fontWeight: 700, color: getEfficiencyColor(overallProductive) }}>
-                      {overallProductive.toFixed(1)}%
+                      {overallProductive.toFixed(2)}%
                     </div>
                   )}
                 </div>
@@ -379,7 +379,7 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     <div style={{ fontSize: 48, fontWeight: 700, color: getAdherenceColor(overallAdherence) }}>
-                      {overallAdherence.toFixed(1)}%
+                      {overallAdherence.toFixed(2)}%
                     </div>
                   )}
                 </div>
