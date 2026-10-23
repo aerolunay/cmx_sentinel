@@ -208,38 +208,34 @@ export default function DashboardPage() {
     return true;
   }), [hourlyRows, groupFilter, agentFilter]);
 
-  // Per hour: the AVERAGE minutes per agent in each aux code - each
-  // code's total divided by the number of agents who recorded any time
-  // in that hour, so a full hour stacks to at most 60m however many
-  // agents are on. productivePct is that hour's productive SHARE of all
-  // recorded time - not Productive Hrs %, whose break allowance only
-  // makes sense per shift, not per hour.
+  // Per hour: each aux code's SHARE of all time recorded in that hour,
+  // shown as minutes out of 60 - no agent count involved, so a column
+  // always stacks to 60m however many agents (or overlapping sessions)
+  // recorded time. productivePct is the same productive share as a % -
+  // not Productive Hrs %, whose break allowance only makes sense per
+  // shift, not per hour.
   const { hourlyAux, hourlyCodes } = useMemo(() => {
     if (filteredHourly.length === 0) return { hourlyAux: [], hourlyCodes: [] };
     const byHour = new Map();
     const codes = new Set();
     for (const r of filteredHourly) {
-      if (!byHour.has(r.hour)) byHour.set(r.hour, { seconds: {}, agents: new Set() });
+      if (!byHour.has(r.hour)) byHour.set(r.hour, { seconds: {} });
       const hour = byHour.get(r.hour);
       hour.seconds[r.auxCode] = (hour.seconds[r.auxCode] || 0) + r.seconds;
-      hour.agents.add(r.agentId);
       codes.add(r.auxCode);
     }
     const hours = [...byHour.keys()];
     const data = [];
     for (let h = Math.min(...hours); h <= Math.max(...hours); h++) {
-      const entry = { hour: formatHourLabel(h), agents: 0, productivePct: null };
+      const entry = { hour: formatHourLabel(h), productivePct: null };
       const bucket = byHour.get(h);
       if (bucket) {
-        const agentCount = bucket.agents.size;
-        let totalSeconds = 0;
+        const totalSeconds = Object.values(bucket.seconds).reduce((sum, s) => sum + s, 0);
         let productiveSeconds = 0;
         for (const [code, seconds] of Object.entries(bucket.seconds)) {
-          entry[code] = Number((seconds / 60 / agentCount).toFixed(2));
-          totalSeconds += seconds;
+          entry[code] = totalSeconds > 0 ? Number(((seconds / totalSeconds) * 60).toFixed(2)) : 0;
           if (PRODUCTIVE_AUX_CODES.includes(code)) productiveSeconds += seconds;
         }
-        entry.agents = agentCount;
         entry.productivePct = totalSeconds > 0 ? Number(((productiveSeconds / totalSeconds) * 100).toFixed(2)) : null;
       }
       data.push(entry);
@@ -388,7 +384,7 @@ export default function DashboardPage() {
               {isLive ? (
                 <>
                   <div className="dashboard-card">
-                    <h3>Average Aux Time per Agent by Hour (Today)</h3>
+                    <h3>Aux Time Share by Hour (Today)</h3>
                     {hourlyAux.length === 0 ? (
                       <p style={{ fontSize: 14, color: '#999' }}>No aux time recorded yet today.</p>
                     ) : (
@@ -397,13 +393,7 @@ export default function DashboardPage() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                           <XAxis dataKey="hour" fontSize={12} />
                           <YAxis fontSize={12} domain={[0, 60]} ticks={[0, 15, 30, 45, 60]} tickFormatter={(v) => `${v}m`} />
-                          <Tooltip
-                            formatter={(value) => formatMinutes(value)}
-                            labelFormatter={(label, payload) => {
-                              const agents = payload?.[0]?.payload?.agents;
-                              return agents ? `${label} · ${agents} agent${agents === 1 ? '' : 's'}` : label;
-                            }}
-                          />
+                          <Tooltip formatter={(value) => `${formatMinutes(value)} of 60m`} />
                           <Legend wrapperStyle={{ fontSize: 12 }} />
                           {hourlyCodes.map((code) => (
                             <Bar key={code} dataKey={code} stackId="aux" name={code} fill={AUX_COLORS[code] || '#9ca3af'} />
