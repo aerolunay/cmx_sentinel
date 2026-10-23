@@ -140,10 +140,10 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
                   </td>
                   <td style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDuration(a.auxSeconds + elapsed)}</td>
                   <td style={a.efficiencyPct == null ? undefined : { fontWeight: 600, color: getEfficiencyColor(a.efficiencyPct) }}>
-                    {a.efficiencyPct == null ? 'N/A' : `${a.efficiencyPct.toFixed(1)}%`}
+                    {a.efficiencyPct == null ? 'N/A' : `${a.efficiencyPct.toFixed(2)}%`}
                   </td>
                   <td style={a.adherencePct == null ? undefined : { fontWeight: 600, color: getAdherenceColor(a.adherencePct) }}>
-                    {a.adherencePct == null ? 'N/A' : `${a.adherencePct.toFixed(1)}%`}
+                    {a.adherencePct == null ? 'N/A' : `${a.adherencePct.toFixed(2)}%`}
                   </td>
                 </tr>
               ))}

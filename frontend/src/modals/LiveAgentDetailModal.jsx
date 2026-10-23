@@ -91,7 +91,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
               <div className="live-detail-tile">
                 <div className="live-detail-label">Productive Hrs</div>
                 <div className="live-detail-value" style={agent.efficiencyPct == null ? undefined : { color: getEfficiencyColor(agent.efficiencyPct) }}>
-                  {agent.efficiencyPct == null ? 'N/A' : `${agent.efficiencyPct.toFixed(1)}%`}
+                  {agent.efficiencyPct == null ? 'N/A' : `${agent.efficiencyPct.toFixed(2)}%`}
                 </div>
                 <div className="live-detail-small">
                   {!hasSchedule
@@ -110,7 +110,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
               <div className="live-detail-tile">
                 <div className="live-detail-label">Adherence</div>
                 <div className="live-detail-value" style={agent.adherencePct == null ? undefined : { color: getAdherenceColor(agent.adherencePct) }}>
-                  {agent.adherencePct == null ? 'N/A' : `${agent.adherencePct.toFixed(1)}%`}
+                  {agent.adherencePct == null ? 'N/A' : `${agent.adherencePct.toFixed(2)}%`}
                 </div>
                 <div className="live-detail-small">
                   {!hasSchedule
