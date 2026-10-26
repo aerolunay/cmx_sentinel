@@ -8,8 +8,19 @@ import AuxMultiSelect from './AuxMultiSelect.jsx';
 
 const REFRESH_MS = 5000;
 
+const NOT_ON_STATES = new Set(['LoggedOut', 'NotLoggedIn', 'Scheduled']);
+
+// "2:00 PM" from an Eastern "YYYY-MM-DD HH:MM:SS" string - string
+// parsing, not Date, so it stays Eastern in any viewer timezone.
+function formatClock(sqlString) {
+  const [hh, mm] = sqlString.slice(11, 16).split(':').map(Number);
+  return `${hh % 12 || 12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`;
+}
+
 // Agents on the Sentinel desktop app today - logged in, or logged out
-// earlier today (aux "LoggedOut") - sorted by state (see
+// earlier today (aux "LoggedOut") - plus agents scheduled today who
+// haven't logged in ("NotLoggedIn" once the shift has started,
+// "Scheduled" before it), sorted by state (see
 // LIVE_STATE_ORDER) and then longest in that state first. Reloaded from
 // the server every 5s (paused while the browser tab is hidden, so idle
 // tabs don't keep querying); in between, the aux duration counts up
@@ -72,7 +83,10 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
     () => scopedAgents.filter((a) => !hiddenStates.has(a.auxCode)),
     [scopedAgents, hiddenStates]
   );
-  const loggedInCount = scopedAgents.filter((a) => a.auxCode !== 'LoggedOut').length;
+  const loggedInCount = scopedAgents.filter((a) => !NOT_ON_STATES.has(a.auxCode)).length;
+  const loggedOutCount = scopedAgents.filter((a) => a.auxCode === 'LoggedOut').length;
+  const notLoggedInCount = scopedAgents.filter((a) => a.auxCode === 'NotLoggedIn').length;
+  const upcomingCount = scopedAgents.filter((a) => a.auxCode === 'Scheduled').length;
 
   // Every known state, plus any unknown one an agent is in right now.
   const stateCounts = useMemo(() => {
@@ -94,8 +108,12 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
         <h3>
           Live Agent Status
           {!loading && (
-            <span className="live-agents-count" title={`${loggedInCount} logged in, ${scopedAgents.length - loggedInCount} logged out`}>
+            <span
+              className="live-agents-count"
+              title={`${loggedInCount} logged in, ${loggedOutCount} logged out, ${notLoggedInCount} scheduled but not logged in, ${upcomingCount} shift not started yet`}
+            >
               {loggedInCount} logged in
+              {notLoggedInCount > 0 && <span style={{ color: '#b91c1c' }}> · {notLoggedInCount} not logged in</span>}
             </span>
           )}
         </h3>
@@ -138,7 +156,12 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
                       {formatAuxLabel(a.auxCode)}
                     </span>
                   </td>
-                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDuration(a.auxSeconds + elapsed)}</td>
+                  <td
+                    style={{ fontVariantNumeric: 'tabular-nums' }}
+                    title={a.auxCode === 'NotLoggedIn' ? `Since scheduled start, ${formatClock(a.scheduledStart)}` : undefined}
+                  >
+                    {a.auxCode === 'Scheduled' ? `Starts ${formatClock(a.scheduledStart)}` : formatDuration(a.auxSeconds + elapsed)}
+                  </td>
                   <td style={a.efficiencyPct == null ? undefined : { fontWeight: 600, color: getEfficiencyColor(a.efficiencyPct) }}>
                     {a.efficiencyPct == null ? 'N/A' : `${a.efficiencyPct.toFixed(2)}%`}
                   </td>
