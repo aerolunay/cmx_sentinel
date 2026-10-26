@@ -709,6 +709,26 @@ async function loadLiveAgents(req, onlyAgentId = null) {
     return [];
   }
 
+  // Last login of the agents with no activity today: the start of their
+  // most recent desktop login on any earlier day (null if never). Agents
+  // with activity today already have it as session_started_est.
+  const lastLoginByAgent = new Map();
+  const noActivityIds = [...current.values()].filter((r) => r.scheduled_start_est).map((r) => r.agent_id);
+  if (noActivityIds.length > 0) {
+    const [lastLoginRows] = await db.query(
+      `SELECT latest.agent_id,
+              DATE_FORMAT(COALESCE(MIN(x.started_at_est), latest.started_at_est), '${EST_FORMAT}') AS last_login_est
+       FROM aux_events latest
+       LEFT JOIN aux_events x
+         ON x.agent_id = latest.agent_id AND x.login_session_id = latest.login_session_id
+       WHERE latest.agent_id IN (?)
+         AND latest.started_at_utc = (SELECT MAX(m.started_at_utc) FROM aux_events m WHERE m.agent_id = latest.agent_id)
+       GROUP BY latest.agent_id, latest.started_at_est`,
+      [noActivityIds]
+    );
+    for (const row of lastLoginRows) lastLoginByAgent.set(row.agent_id, row.last_login_est);
+  }
+
   const agentIds = [...current.keys()];
   for (const row of current.values()) {
     row.shiftDate = (row.session_started_est || row.aux_started_est).slice(0, 10);
@@ -824,6 +844,9 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       auxSeconds: Math.max(0, Math.round((nowMs - toMs(cur.aux_started_est)) / 1000)),
       // Only for "NotLoggedIn"/"Scheduled" agents - their first scheduled start today.
       scheduledStart: cur.scheduled_start_est || null,
+      // Start of the agent's most recent desktop login; null if never.
+      lastLoginAt: cur.scheduled_start_est ? lastLoginByAgent.get(cur.agent_id) || null
+        : cur.session_started_est || cur.aux_started_est,
       efficiencyPct: productive ? productive.pct : null,
       adherencePct: elapsedScheduledSeconds > 0 ? (adherentSeconds / elapsedScheduledSeconds) * 100 : null,
       detail: {
