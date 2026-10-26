@@ -17,8 +17,8 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 // rest of this project has been careful to avoid around Eastern-day
 // boundaries (see EasternTime.cs, luxon usage in recordingRoutes.js).
 function formatDailyDate(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return `${MONTH_NAMES[m - 1]} ${d}, ${y}`;
+  const [y, m, d] = dateStr.split('-');
+  return `${m}/${d}/${y}`; // "2026-09-11" -> "09/11/2026"
 }
 
 // "8:05 AM" for an Eastern "YYYY-MM-DD HH:MM:SS" string, with the date
@@ -31,11 +31,10 @@ function TimeOfDay({ value, rowDate }) {
   const [h, m] = timePart.split(':').map(Number);
   const time = `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
   if (datePart === rowDate) return <span className="report-time">{time}</span>;
-  const [, mo, d] = datePart.split('-').map(Number);
   return (
     <>
       <span className="report-time">{time}</span>
-      <div className="report-time-date">{MONTH_NAMES[mo - 1]} {d}</div>
+      <div className="report-time-date">{formatDailyDate(datePart)}</div>
     </>
   );
 }
