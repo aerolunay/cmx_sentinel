@@ -585,7 +585,15 @@ async function loadLiveAgents(req, onlyAgentId = null) {
   const nowMs = toMs(nowEst);
   const cutoffEst = toEasternSqlString(new Date(now.getTime() - MAX_OPEN_SEGMENT_HOURS * 3600 * 1000));
 
-  const conditions = ["ae.ended_at_utc IS NULL", "ae.started_at_est >= ?"];
+  // Open AND the agent's latest segment - a row whose close never reached
+  // the server, followed by later segments, is a leftover, not proof the
+  // agent is still logged in (same rule as RUNNING_SEGMENT_SQL).
+  const conditions = [
+    "ae.ended_at_utc IS NULL",
+    "ae.started_at_est >= ?",
+    `NOT EXISTS (SELECT 1 FROM aux_events later
+                 WHERE later.agent_id = ae.agent_id AND later.started_at_est > ae.started_at_est)`,
+  ];
   const params = [cutoffEst];
   if (scopedGroupIds !== null) {
     conditions.push(`a.group_id IN (${scopedGroupIds.map(() => "?").join(",")})`);

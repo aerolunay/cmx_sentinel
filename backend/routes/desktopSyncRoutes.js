@@ -116,6 +116,11 @@ function warnIfClockSkewed(machineName, clientTimestamp, serverNow) {
   console.warn(`Clock on ${key} is off by ${Math.round(skewMs / 1000)}s - using server time for its aux events.`);
 }
 
+// Unclosed segments seen in production split cleanly: lost close
+// requests within a shift (under 10 h) vs. logins resumed overnight or
+// days later (15 h+). See sql/006_close_orphaned_aux_events.sql.
+const ORPHAN_CLOSE_MAX_HOURS = 12;
+
 router.post("/aux-events/open", async (req, res) => {
   const { agentId, sessionId, machineName, auxCode, startedAtUtc } = req.body || {};
   if (!agentId || !sessionId || !machineName || !auxCode) {
@@ -125,6 +130,30 @@ router.post("/aux-events/open", async (req, res) => {
   try {
     const startedAtUtcDate = new Date();
     warnIfClockSkewed(machineName, startedAtUtc, startedAtUtcDate);
+    // A login has one segment at a time, so anything still open in this
+    // session ends where the new one starts. Normally the PC already
+    // closed it via /close; this covers a close request that never
+    // arrived, which would otherwise leave the row open - dropped from
+    // the reports and showing the agent as logged in on the live view.
+    // Only for rows opened in the last ORPHAN_CLOSE_MAX_HOURS: an older
+    // one is a login the app resumed after being shut down overnight or
+    // for days, and ending it here would credit all that time as worked.
+    const startedAtEst = toEasternSqlString(startedAtUtcDate);
+    const [orphaned] = await db.query(
+      `UPDATE aux_events
+       SET ended_at_utc = GREATEST(started_at_utc, ?),
+           ended_at_est = GREATEST(started_at_est, ?),
+           duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_utc, ?))
+       WHERE agent_id = ? AND login_session_id = ? AND ended_at_utc IS NULL
+         AND started_at_utc >= ?`,
+      [
+        startedAtUtcDate, startedAtEst, startedAtUtcDate, agentId, sessionId,
+        new Date(startedAtUtcDate.getTime() - ORPHAN_CLOSE_MAX_HOURS * 3600 * 1000),
+      ]
+    );
+    if (orphaned.affectedRows > 0) {
+      console.warn(`Closed ${orphaned.affectedRows} unclosed aux segment(s) for agent ${agentId} on ${machineName} when it opened ${auxCode}.`);
+    }
     const [result] = await db.query(
       `INSERT INTO aux_events (agent_id, login_session_id, machine_name, aux_code, started_at_utc, started_at_est)
        VALUES (?, ?, ?, ?, ?, ?)`,
