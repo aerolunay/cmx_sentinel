@@ -150,14 +150,22 @@ label { margin-right: 6px; }
    Stacks (panel below) on narrower screens. */
 .dashboard-layout { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
 .dashboard-main { flex: 1 1 520px; min-width: 0; }
-.dashboard-side { flex: 0 1 460px; min-width: 0; position: sticky; top: 16px; }
+/* Live Agent Status above Not Logged In: both share the viewport height,
+   each scrolling on its own, so the lower card stays reachable while the
+   panel is sticky. */
+.dashboard-side {
+  flex: 0 1 460px; min-width: 0; position: sticky; top: 16px;
+  display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 32px);
+}
+.dashboard-side > .live-agents { display: flex; flex-direction: column; min-height: 120px; }
 @media (max-width: 1200px) {
-  .dashboard-side { flex: 1 1 100%; position: static; }
+  .dashboard-side { flex: 1 1 100%; position: static; max-height: none; }
+  .dashboard-side .live-agents-scroll { max-height: 60vh; }
 }
 .live-agents { padding: 16px; }
 .live-agents h3 { display: flex; align-items: center; gap: 8px; }
 .live-agents-count { background: #1a2b4a; color: white; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
-.live-agents-scroll { max-height: calc(100vh - 220px); overflow-y: auto; }
+.live-agents-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .live-agents table { box-shadow: none; }
 .live-agents th, .live-agents td { padding: 6px 8px; font-size: 13px; }
 .live-agents th { position: sticky; top: 0; }
