@@ -74,11 +74,17 @@ export default function MetricsHelpModal({ onClose }) {
         <section>
           <h3>Schedule Adherence %</h3>
           <div className="metrics-formula">
-            Adherence % = (Logged time inside schedule + Credited reconnect gaps) ÷ Scheduled time elapsed so far × 100
+            Adherence % = (Logged time inside schedule + Credited reconnect gaps − Lunch/Break deviation) ÷ Scheduled time elapsed so far × 100
           </div>
           <ul>
             <li><strong>Scheduled time elapsed</strong> - scheduled minutes from the shift start up to now (or the full shift once it has ended).</li>
             <li><strong>Credited reconnect gaps</strong> - time between one desktop login ending and the next one starting (reconnects, switching PCs) counts as adherent, unless the agent was in Idle when they logged out.</li>
+            <li>
+              <strong>Lunch/Break deviation</strong> - agents are expected to take exactly the break allowance (the same
+              combined Lunch + Break allowance as Productive Hrs %). Time over it counts against adherence right away;
+              lunch or breaks skipped or cut short count once the shift has ended. Coming back up to 3 minutes early
+              is allowed; past that, the whole shortfall counts.
+            </li>
             <li>Starting late or leaving early is never credited.</li>
           </ul>
           <div className="metrics-example">
@@ -87,6 +93,13 @@ export default function MetricsHelpModal({ onClose }) {
             8:15 AM and drops off from 10:00 to 10:10 AM while in Production.
             <div className="metrics-calc">(3h 35m logged + 10m credited) ÷ 4h = 3.75 ÷ 4 = <strong>93.8%</strong></div>
             The 15 minutes late at the start are not credited.
+          </div>
+          <div className="metrics-example" style={{ marginTop: 8 }}>
+            <div className="metrics-example-title">Example - short and long breaks, full 9h shift</div>
+            Shift 8:00 AM - 5:00 PM, logged in the whole 9h, so the allowance is 1h.
+            <div className="metrics-calc">Took 45m of Lunch + Break: (9h − 15m short) ÷ 9h = <strong>97.2%</strong></div>
+            <div className="metrics-calc">Took 1h 15m: (9h − 15m over) ÷ 9h = <strong>97.2%</strong></div>
+            <div className="metrics-calc">Took 58m (2m short, within the 3-minute leeway) or exactly 1h: 9h ÷ 9h = <strong>100%</strong></div>
           </div>
         </section>
 
@@ -111,15 +124,14 @@ export default function MetricsHelpModal({ onClose }) {
             can differ from the Today cards.
           </p>
           <ul>
-            <li><strong>Average aux time per agent</strong> - each aux code's total minutes in the hour ÷ the number of agents who recorded any time in that hour.</li>
-            <li><strong>Productive Share</strong> - productive minutes ÷ all recorded minutes in the hour, across those agents.</li>
+            <li><strong>Aux time share</strong> - each aux code's share of all minutes recorded in the hour, shown as minutes out of 60, so a column always stacks to 60m.</li>
+            <li><strong>Productive Share</strong> - productive minutes ÷ all recorded minutes in the hour, as a %.</li>
           </ul>
           <div className="metrics-example">
             <div className="metrics-example-title">Example - 9 AM to 10 AM</div>
-            3 agents record Production 150m, Break 15m and Idle 15m between them.
-            <div className="metrics-calc">Production 150 ÷ 3 = <strong>50m</strong> · Break 15 ÷ 3 = <strong>5m</strong> · Idle 15 ÷ 3 = <strong>5m</strong></div>
-            <div className="metrics-calc">Productive Share = 150 ÷ 180 = <strong>83.3%</strong></div>
-            The current hour is still in progress, so its bar is shorter until the hour ends.
+            Agents record Production 150m, Break 15m and Idle 15m between them (180m in total).
+            <div className="metrics-calc">Production 150 ÷ 180 × 60 = <strong>50m</strong> · Break <strong>5m</strong> · Idle <strong>5m</strong></div>
+            <div className="metrics-calc">Productive Share = 150 ÷ 180 = <strong>83.33%</strong></div>
           </div>
         </section>
 

@@ -113,11 +113,21 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
                   {agent.adherencePct == null ? 'N/A' : `${agent.adherencePct.toFixed(2)}%`}
                 </div>
                 <div className="live-detail-small">
-                  {!hasSchedule
-                    ? 'No schedule for this shift'
-                    : d.creditedGapSeconds > 0
-                      ? `(${formatDuration(d.countedSeconds)} logged + ${formatDuration(d.creditedGapSeconds)} reconnect gaps) ÷ ${formatDuration(d.elapsedScheduledSeconds)} scheduled so far`
-                      : `${formatDuration(d.countedSeconds)} logged ÷ ${formatDuration(d.elapsedScheduledSeconds)} scheduled so far`}
+                  {!hasSchedule ? 'No schedule for this shift' : (
+                    <>
+                      ({formatDuration(d.countedSeconds)} logged
+                      {d.creditedGapSeconds > 0 && ` + ${formatDuration(d.creditedGapSeconds)} reconnect gaps`}
+                      {d.breakOverSeconds > 0 && ` − ${formatDuration(d.breakOverSeconds)} lunch/break over allowance`}
+                      {d.breakShortSeconds > 0 && ` − ${formatDuration(d.breakShortSeconds)} lunch/break not taken`}
+                      ) ÷ {formatDuration(d.elapsedScheduledSeconds)} scheduled so far
+                      {d.countedSeconds > 0 && (
+                        <div>
+                          Lunch + Break: {formatDuration(d.breakTakenSeconds)} taken of {formatDuration(d.breakAdherenceAllowanceSeconds)} allowed
+                          {!d.shiftOver && d.breakTakenSeconds < d.breakAdherenceAllowanceSeconds && ' (any shortfall counts once the shift ends)'}.
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </div>
