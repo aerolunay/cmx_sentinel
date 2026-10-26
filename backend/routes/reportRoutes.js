@@ -73,6 +73,29 @@ function productiveHrs(auxSeconds, loginSeconds) {
   return result;
 }
 
+// Lunch/break adherence: agents are expected to use exactly the break
+// allowance (the same combined Lunch + Break allowance as Productive Hrs
+// %), and any difference counts against adherence. Time over the
+// allowance counts right away; a shortfall (skipped or short
+// lunch/break) only once the shift has ended, so an agent who simply
+// hasn't had lunch yet isn't marked down mid-shift. A shortfall within
+// BREAK_SHORT_LEEWAY_SECONDS is ignored - agents often switch back a
+// minute or two early to avoid going over - but past it the whole
+// shortfall counts. Not logged in at all = nothing to measure.
+const BREAK_SHORT_LEEWAY_SECONDS = 3 * 60;
+
+function breakAdherence(auxSeconds, loginSeconds, shiftOver) {
+  const takenSeconds = (auxSeconds.Lunch || 0) + (auxSeconds.Break || 0);
+  if (loginSeconds <= 0) {
+    return { allowanceSeconds: 0, takenSeconds, overSeconds: 0, shortSeconds: 0, deviationSeconds: 0 };
+  }
+  const allowanceSeconds = breakAllowanceSeconds(loginSeconds);
+  const overSeconds = Math.max(0, takenSeconds - allowanceSeconds);
+  const shortfallSeconds = Math.max(0, allowanceSeconds - takenSeconds);
+  const shortSeconds = shiftOver && shortfallSeconds > BREAK_SHORT_LEEWAY_SECONDS ? shortfallSeconds : 0;
+  return { allowanceSeconds, takenSeconds, overSeconds, shortSeconds, deviationSeconds: overSeconds + shortSeconds };
+}
+
 // _est columns and agent_schedules are plain Eastern wall-clock values,
 // so they're compared as naive timestamps (parsed as if UTC) - the same
 // thing TIMESTAMPDIFF does with them in the SQL below.
@@ -433,7 +456,11 @@ router.get("/efficiency", async (req, res) => {
       const creditedSeconds = entry.hasSchedule
         ? creditedGapSeconds.get(`${entry.agentId}|${entry.date}`) || 0
         : 0;
-      const adherentSeconds = totalSeconds + creditedSeconds;
+      // The shift is over once all of its scheduled time has elapsed.
+      const breaks = entry.hasSchedule
+        ? breakAdherence(auxSeconds, totalSeconds, entry.elapsedScheduledSeconds >= entry.scheduledSeconds)
+        : null;
+      const adherentSeconds = Math.max(0, totalSeconds + creditedSeconds - (breaks ? breaks.deviationSeconds : 0));
       // No schedule, no Productive Hrs % - the aux rows are still
       // returned, so it appears on its own once a schedule is added.
       const productive = entry.hasSchedule ? productiveHrs(auxSeconds, totalSeconds) : null;
@@ -465,10 +492,13 @@ router.get("/efficiency", async (req, res) => {
         // The part of the schedule that has started so far - the
         // adherence denominator (equals scheduledHours once the shift is over).
         elapsedScheduledHours: entry.hasSchedule ? entry.elapsedScheduledSeconds / 3600 : null,
-        // Logged time within schedule plus credited reconnect gaps -
-        // the numerator of adherencePct, exposed so monthly/dashboard
-        // totals can sum it the same way.
+        // Logged time within schedule plus credited reconnect gaps, minus
+        // lunch/break time over or short of the allowance - the numerator
+        // of adherencePct, exposed so monthly/dashboard totals can sum it
+        // the same way.
         creditedGapHours: entry.hasSchedule ? creditedSeconds / 3600 : null,
+        breakOverHours: breaks ? breaks.overSeconds / 3600 : null,
+        breakShortHours: breaks ? breaks.shortSeconds / 3600 : null,
         adherentHours: entry.hasSchedule ? adherentSeconds / 3600 : null,
         adherencePct: entry.hasSchedule && entry.elapsedScheduledSeconds > 0
           ? (adherentSeconds / entry.elapsedScheduledSeconds) * 100
@@ -832,7 +862,10 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       };
       creditedGapSeconds += credited;
     }
-    const adherentSeconds = countedSeconds + creditedGapSeconds;
+    const countedAuxSeconds = Object.fromEntries([...auxTotals].map(([code, t]) => [code, t.countedSeconds]));
+    const shiftOver = hasSchedule && nowMs >= Math.max(...windows.map((w) => w.endMs));
+    const breaks = hasSchedule ? breakAdherence(countedAuxSeconds, countedSeconds, shiftOver) : null;
+    const adherentSeconds = Math.max(0, countedSeconds + creditedGapSeconds - (breaks ? breaks.deviationSeconds : 0));
 
     const scheduledSeconds = windows.reduce((sum, w) => sum + (w.endMs - w.startMs) / 1000, 0);
     const elapsedScheduledSeconds = windows.reduce(
@@ -840,7 +873,6 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       0
     );
     const loggedSeconds = [...auxTotals.values()].reduce((sum, t) => sum + t.loggedSeconds, 0);
-    const countedAuxSeconds = Object.fromEntries([...auxTotals].map(([code, t]) => [code, t.countedSeconds]));
     const productive = hasSchedule ? productiveHrs(countedAuxSeconds, countedSeconds) : null;
 
     return {
@@ -885,6 +917,11 @@ async function loadLiveAgents(req, onlyAgentId = null) {
         nonProductiveSeconds: productive ? Math.round(productive.nonProductiveSeconds) : null,
         excessBreakSeconds: productive ? Math.round(productive.excessBreakSeconds) : null,
         creditedGapSeconds: Math.round(creditedGapSeconds),
+        breakTakenSeconds: breaks ? Math.round(breaks.takenSeconds) : null,
+        breakAdherenceAllowanceSeconds: breaks ? Math.round(breaks.allowanceSeconds) : null,
+        breakOverSeconds: breaks ? Math.round(breaks.overSeconds) : null,
+        breakShortSeconds: breaks ? Math.round(breaks.shortSeconds) : null,
+        shiftOver,
         adherentSeconds: Math.round(adherentSeconds),
         scheduledSeconds: hasSchedule ? Math.round(scheduledSeconds) : null,
         elapsedScheduledSeconds: hasSchedule ? Math.round(elapsedScheduledSeconds) : null,
