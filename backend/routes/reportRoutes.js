@@ -559,7 +559,8 @@ router.get("/hourly-aux", async (req, res) => {
 });
 
 // Agents currently logged in to the desktop app (plus those who logged
-// out earlier today, as aux "LoggedOut"), with their current aux and
+// out earlier today, as aux "LoggedOut", and those scheduled today who
+// haven't logged in, as "NotLoggedIn"/"Scheduled"), with their current aux and
 // live Productive Hrs/adherence for the shift they're on - optionally
 // narrowed to one agent. "The shift" is the Eastern calendar day their
 // current login session started on, so an overnight shift keeps
@@ -661,6 +662,46 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       aux_code: "LoggedOut",
       aux_started_est: row.ended_est,
       session_started_est: row.session_started_est || row.started_est,
+    });
+  }
+
+  // Agents scheduled today (Eastern) with no desktop activity today - the
+  // overall adherence already counts them, so they're listed too:
+  // "NotLoggedIn" once their shift has started (timed from the scheduled
+  // start, 0% adherence), "Scheduled" while it hasn't (N/A adherence).
+  const todayEst = nowEst.slice(0, 10);
+  const scheduledConditions = ["s.shift_date = ?"];
+  const scheduledParams = [todayEst];
+  if (scopedGroupIds !== null) {
+    scheduledConditions.push(`a.group_id IN (${scopedGroupIds.map(() => "?").join(",")})`);
+    scheduledParams.push(...scopedGroupIds);
+  }
+  if (onlyAgentId) {
+    scheduledConditions.push("s.agent_id = ?");
+    scheduledParams.push(onlyAgentId);
+  }
+  const [scheduledTodayRows] = await db.query(
+    `SELECT s.agent_id, a.display_name, a.group_id, g.group_name,
+            DATE_FORMAT(MIN(s.scheduled_start), '${EST_FORMAT}') AS start_est
+     FROM agent_schedules s
+     JOIN agents a ON a.agent_id = s.agent_id
+     LEFT JOIN agent_groups g ON g.group_id = a.group_id
+     WHERE ${scheduledConditions.join(" AND ")}
+     GROUP BY s.agent_id, a.display_name, a.group_id, g.group_name`,
+    scheduledParams
+  );
+  for (const row of scheduledTodayRows) {
+    if (current.has(row.agent_id)) continue;
+    current.set(row.agent_id, {
+      event_id: null,
+      agent_id: row.agent_id,
+      display_name: row.display_name,
+      group_id: row.group_id,
+      group_name: row.group_name,
+      aux_code: toMs(row.start_est) <= nowMs ? "NotLoggedIn" : "Scheduled",
+      aux_started_est: row.start_est,
+      session_started_est: `${todayEst} 00:00:00`,
+      scheduled_start_est: row.start_est,
     });
   }
 
@@ -781,6 +822,8 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       groupName: cur.group_name,
       auxCode: cur.aux_code,
       auxSeconds: Math.max(0, Math.round((nowMs - toMs(cur.aux_started_est)) / 1000)),
+      // Only for "NotLoggedIn"/"Scheduled" agents - their first scheduled start today.
+      scheduledStart: cur.scheduled_start_est || null,
       efficiencyPct: productive ? productive.pct : null,
       adherencePct: elapsedScheduledSeconds > 0 ? (adherentSeconds / elapsedScheduledSeconds) * 100 : null,
       detail: {
