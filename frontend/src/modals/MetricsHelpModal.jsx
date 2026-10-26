@@ -104,6 +104,31 @@ export default function MetricsHelpModal({ onClose }) {
         </section>
 
         <section>
+          <h3>Reports columns</h3>
+          <ul>
+            <li>
+              <strong>Lunch/Break Over</strong> - combined Lunch + Break time beyond the break allowance. It is taken
+              off adherence, and also counts as Non-productive in Productive Hrs %.
+            </li>
+            <li>
+              <strong>Lunch/Break Short</strong> - break allowance not used (lunch or breaks skipped or cut short),
+              once the shift has ended. Up to 3 minutes short is ignored; past that the whole shortfall counts. It is
+              taken off adherence only - Productive Hrs % is unaffected.
+            </li>
+            <li>
+              Both show <strong>N/A</strong> on days without a schedule. Monthly rows add up the days of the month;
+              the CSV export has the same columns, in hours.
+            </li>
+          </ul>
+          <div className="metrics-example">
+            <div className="metrics-example-title">Example - one daily row</div>
+            9h shift, logged in the whole 9h, Lunch + Break 40m. The allowance is 1h, so Lunch/Break Short = 20m
+            and Lunch/Break Over = 0.
+            <div className="metrics-calc">Adherence = (9h − 20m) ÷ 9h = <strong>96.30%</strong></div>
+          </div>
+        </section>
+
+        <section>
           <h3>Several agents or days</h3>
           <p>
             Hours are added up first and divided once - percentages are never averaged, so a long day weighs more
