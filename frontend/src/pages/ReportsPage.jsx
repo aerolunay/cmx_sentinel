@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import MetricsHelpModal from '../modals/MetricsHelpModal.jsx';
 
 // Same aux codes the desktop app tracks (see AgentState.cs) - shown as
 // columns in a fixed order regardless of which ones a given row
@@ -61,7 +62,8 @@ function formatMonthLabel(monthStr) {
 // started); Productive Hrs % and adherence are accumulated ONLY from days
 // that actually have a schedule, so a day with no schedule simply
 // doesn't affect the adherence figure either way. adherentHours
-// includes credited reconnect gaps between logins - see reportRoutes.js.
+// includes credited reconnect gaps between logins, minus lunch/break
+// time over or short of the allowance - see reportRoutes.js.
 function aggregateMonthly(dailyRows) {
   const grouped = new Map();
 
@@ -81,6 +83,8 @@ function aggregateMonthly(dailyRows) {
         scheduledHours: 0,
         elapsedScheduledHours: 0,
         adherentHours: 0,
+        breakOverHours: 0,
+        breakShortHours: 0,
         hasAnySchedule: false,
       });
     }
@@ -93,6 +97,8 @@ function aggregateMonthly(dailyRows) {
       entry.scheduledHours += r.scheduledHours || 0;
       entry.elapsedScheduledHours += r.elapsedScheduledHours ?? r.scheduledHours ?? 0;
       entry.adherentHours += r.adherentHours ?? r.totalHours;
+      entry.breakOverHours += r.breakOverHours || 0;
+      entry.breakShortHours += r.breakShortHours || 0;
       if (r.productiveBaseHours != null) {
         entry.productiveCreditHours += r.productiveCreditHours || 0;
         entry.productiveBaseHours += r.productiveBaseHours;
@@ -149,10 +155,19 @@ function getAdherenceColor(pct) {
   return '#b91c1c'; // red
 }
 
+// Lunch/break time over or short of the allowance - what adherence
+// takes off for breaks. Blank/N/A without a schedule (no adherence then).
+function hasBreakNumbers(r) {
+  return r.hasSchedule || r.hasAnySchedule;
+}
+function breakCell(r, key) {
+  return hasBreakNumbers(r) ? (r[key] || 0).toFixed(2) : '';
+}
+
 // Daily rows also get the scheduled/actual start and end times.
 function toCsv(rows, isDaily) {
   const timeHeaders = isDaily ? ['Scheduled Start', 'Scheduled End', 'Actual Start', 'Actual End'] : [];
-  const headers = ['Date', 'Agent', 'Agent ID', 'Group', ...timeHeaders, ...AUX_CODES, 'Total Hours', 'Productive Hrs %', 'Scheduled Hours', 'Adherence %'];
+  const headers = ['Date', 'Agent', 'Agent ID', 'Group', ...timeHeaders, ...AUX_CODES, 'Total Hours', 'Productive Hrs %', 'Scheduled Hours', 'Lunch/Break Over', 'Lunch/Break Short', 'Adherence %'];
   const lines = [headers.join(',')];
 
   for (const r of rows) {
@@ -169,6 +184,8 @@ function toCsv(rows, isDaily) {
       r.totalHours.toFixed(2),
       r.efficiencyPct == null ? '' : r.efficiencyPct.toFixed(2),
       r.scheduledHours == null ? '' : r.scheduledHours.toFixed(2),
+      breakCell(r, 'breakOverHours'),
+      breakCell(r, 'breakShortHours'),
       r.adherencePct == null ? '' : r.adherencePct.toFixed(2),
     ];
     lines.push(line.join(','));
@@ -186,6 +203,7 @@ export default function ReportsPage() {
   const [agentFilter, setAgentFilter] = useState('');
   const [groupFilter, setGroupFilter] = useState('');
   const [viewMode, setViewMode] = useState('monthly'); // 'monthly' | 'daily'
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     loadReport();
@@ -245,7 +263,18 @@ export default function ReportsPage() {
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-        <h2 style={{ margin: 0 }}>Reports</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h2 style={{ margin: 0 }}>Reports</h2>
+          <button
+            type="button"
+            className="help-button"
+            onClick={() => setShowHelp(true)}
+            aria-label="How are these numbers calculated?"
+            title="How are these numbers calculated?"
+          >
+            ?
+          </button>
+        </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <select value={viewMode} onChange={(e) => setViewMode(e.target.value)}
             style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14, fontWeight: 600 }}>
@@ -313,6 +342,8 @@ export default function ReportsPage() {
                 <th>Total Hours</th>
                 <th>Productive Hrs %</th>
                 <th>Scheduled Hours</th>
+                <th title="Lunch + Break time over the allowance - taken off adherence">Lunch/Break Over</th>
+                <th title="Lunch + Break allowance not used, beyond a 3-minute leeway - taken off adherence">Lunch/Break Short</th>
                 <th>Adherence %</th>
               </tr>
             </thead>
@@ -342,6 +373,11 @@ export default function ReportsPage() {
                     {r.efficiencyPct == null ? <em style={{ color: '#999' }}>N/A</em> : `${r.efficiencyPct.toFixed(2)}%`}
                   </td>
                   <td>{r.scheduledHours == null ? <em style={{ color: '#999' }}>no schedule</em> : formatHours(r.scheduledHours)}</td>
+                  {['breakOverHours', 'breakShortHours'].map((key) => (
+                    <td key={key} style={r[key] > 0 ? { color: '#b91c1c', fontWeight: 600 } : undefined}>
+                      {hasBreakNumbers(r) ? formatHours(r[key]) : <em style={{ color: '#999' }}>N/A</em>}
+                    </td>
+                  ))}
                   <td style={r.adherencePct == null ? undefined : { fontWeight: 600, color: getAdherenceColor(r.adherencePct) }}>
                     {r.adherencePct == null ? <em style={{ color: '#999' }}>N/A</em> : `${r.adherencePct.toFixed(2)}%`}
                   </td>
@@ -351,6 +387,8 @@ export default function ReportsPage() {
           </table>
         </div>
       )}
+
+      {showHelp && <MetricsHelpModal onClose={() => setShowHelp(false)} />}
     </>
   );
 }
