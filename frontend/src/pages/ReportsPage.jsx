@@ -342,7 +342,7 @@ export default function ReportsPage() {
                 <th>Productive Hrs %</th>
                 <th>Scheduled Hours</th>
                 <th title="Lunch + Break time over the allowance - taken off adherence">Lunch/Break Over</th>
-                <th title="Lunch + Break allowance not used, beyond a 3-minute leeway - taken off adherence">Lunch/Break Short</th>
+                <th title="Lunch + Break allowance not used, 5 minutes or more - taken off adherence">Lunch/Break Short</th>
                 <th>Adherence %</th>
               </tr>
             </thead>

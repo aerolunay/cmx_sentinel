@@ -78,11 +78,11 @@ function productiveHrs(auxSeconds, loginSeconds) {
 // %), and any difference counts against adherence. Time over the
 // allowance counts right away; a shortfall (skipped or short
 // lunch/break) only once the shift has ended, so an agent who simply
-// hasn't had lunch yet isn't marked down mid-shift. A shortfall within
+// hasn't had lunch yet isn't marked down mid-shift. A shortfall under
 // BREAK_SHORT_LEEWAY_SECONDS is ignored - agents often switch back a
-// minute or two early to avoid going over - but past it the whole
+// few minutes early to avoid going over - but at or past it the whole
 // shortfall counts. Not logged in at all = nothing to measure.
-const BREAK_SHORT_LEEWAY_SECONDS = 3 * 60;
+const BREAK_SHORT_LEEWAY_SECONDS = 5 * 60;
 
 function breakAdherence(auxSeconds, loginSeconds, shiftOver) {
   const takenSeconds = (auxSeconds.Lunch || 0) + (auxSeconds.Break || 0);
@@ -92,7 +92,7 @@ function breakAdherence(auxSeconds, loginSeconds, shiftOver) {
   const allowanceSeconds = breakAllowanceSeconds(loginSeconds);
   const overSeconds = Math.max(0, takenSeconds - allowanceSeconds);
   const shortfallSeconds = Math.max(0, allowanceSeconds - takenSeconds);
-  const shortSeconds = shiftOver && shortfallSeconds > BREAK_SHORT_LEEWAY_SECONDS ? shortfallSeconds : 0;
+  const shortSeconds = shiftOver && shortfallSeconds >= BREAK_SHORT_LEEWAY_SECONDS ? shortfallSeconds : 0;
   return { allowanceSeconds, takenSeconds, overSeconds, shortSeconds, deviationSeconds: overSeconds + shortSeconds };
 }
 

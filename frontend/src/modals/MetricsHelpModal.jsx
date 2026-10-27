@@ -82,8 +82,8 @@ export default function MetricsHelpModal({ onClose }) {
             <li>
               <strong>Lunch/Break deviation</strong> - agents are expected to take exactly the break allowance (the same
               combined Lunch + Break allowance as Productive Hrs %). Time over it counts against adherence right away;
-              lunch or breaks skipped or cut short count once the shift has ended. Coming back up to 3 minutes early
-              is allowed; past that, the whole shortfall counts.
+              lunch or breaks skipped or cut short count once the shift has ended. A total shortfall of less than 5
+              minutes is allowed; at 5 minutes or more, the whole shortfall counts.
             </li>
             <li>Starting late or leaving early is never credited.</li>
           </ul>
@@ -99,7 +99,7 @@ export default function MetricsHelpModal({ onClose }) {
             Shift 8:00 AM - 5:00 PM, logged in the whole 9h, so the allowance is 1h.
             <div className="metrics-calc">Took 45m of Lunch + Break: (9h − 15m short) ÷ 9h = <strong>97.2%</strong></div>
             <div className="metrics-calc">Took 1h 15m: (9h − 15m over) ÷ 9h = <strong>97.2%</strong></div>
-            <div className="metrics-calc">Took 58m (2m short, within the 3-minute leeway) or exactly 1h: 9h ÷ 9h = <strong>100%</strong></div>
+            <div className="metrics-calc">Took 56m (4m short, under the 5-minute leeway) or exactly 1h: 9h ÷ 9h = <strong>100%</strong></div>
           </div>
         </section>
 
@@ -112,7 +112,7 @@ export default function MetricsHelpModal({ onClose }) {
             </li>
             <li>
               <strong>Lunch/Break Short</strong> - break allowance not used (lunch or breaks skipped or cut short),
-              once the shift has ended. Up to 3 minutes short is ignored; past that the whole shortfall counts. It is
+              once the shift has ended. Less than 5 minutes short is ignored; at 5 minutes or more the whole shortfall counts. It is
               taken off adherence only - Productive Hrs % is unaffected.
             </li>
             <li>
