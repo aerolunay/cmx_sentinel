@@ -121,6 +121,10 @@ function warnIfClockSkewed(machineName, clientTimestamp, serverNow) {
 // days later (15 h+). See sql/006_close_orphaned_aux_events.sql.
 const ORPHAN_CLOSE_MAX_HOURS = 12;
 
+// The longest pause between closing one aux segment and opening the next
+// in the same login that is still treated as a straight switch.
+const AUX_SWITCH_MAX_GAP_SECONDS = 60;
+
 router.post("/aux-events/open", async (req, res) => {
   const { agentId, sessionId, machineName, auxCode, startedAtUtc } = req.body || {};
   if (!agentId || !sessionId || !machineName || !auxCode) {
@@ -154,10 +158,30 @@ router.post("/aux-events/open", async (req, res) => {
     if (orphaned.affectedRows > 0) {
       console.warn(`Closed ${orphaned.affectedRows} unclosed aux segment(s) for agent ${agentId} on ${machineName} when it opened ${auxCode}.`);
     }
+    // An aux switch arrives as /close then /open, each stamped on
+    // arrival, so the moment between them belonged to no aux code and
+    // was lost from adherence. If this login's previous segment closed
+    // within AUX_SWITCH_MAX_GAP_SECONDS, start exactly where it ended.
+    const [[previous]] = await db.query(
+      `SELECT ended_at_utc, ended_at_est
+       FROM aux_events
+       WHERE agent_id = ? AND login_session_id = ? AND ended_at_utc IS NOT NULL
+         AND ended_at_utc BETWEEN ? AND ?
+       ORDER BY ended_at_utc DESC
+       LIMIT 1`,
+      [
+        agentId, sessionId,
+        new Date(startedAtUtcDate.getTime() - AUX_SWITCH_MAX_GAP_SECONDS * 1000), startedAtUtcDate,
+      ]
+    );
     const [result] = await db.query(
       `INSERT INTO aux_events (agent_id, login_session_id, machine_name, aux_code, started_at_utc, started_at_est)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [agentId, sessionId, machineName, auxCode, startedAtUtcDate, toEasternSqlString(startedAtUtcDate)]
+      [
+        agentId, sessionId, machineName, auxCode,
+        previous ? previous.ended_at_utc : startedAtUtcDate,
+        previous ? previous.ended_at_est : startedAtEst,
+      ]
     );
     res.json({ eventId: result.insertId });
   } catch (err) {
