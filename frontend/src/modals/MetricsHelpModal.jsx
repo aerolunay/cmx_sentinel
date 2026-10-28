@@ -78,7 +78,7 @@ export default function MetricsHelpModal({ onClose }) {
           </div>
           <ul>
             <li><strong>Scheduled time elapsed</strong> - scheduled minutes from the shift start up to now (or the full shift once it has ended).</li>
-            <li><strong>Credited reconnect gaps</strong> - time between one desktop login ending and the next one starting (reconnects, switching PCs) counts as adherent, unless the agent was in Idle when they logged out.</li>
+            <li><strong>Credited reconnect gaps</strong> - time between one desktop login ending and the next one starting (reconnects, switching PCs) counts as adherent, unless the agent was in Idle when they logged out. Only gaps of 30 minutes or less count - a longer one means the agent was away.</li>
             <li>
               <strong>Lunch/Break deviation</strong> - agents are expected to take exactly the break allowance (the same
               combined Lunch + Break allowance as Productive Hrs %). Time over it counts against adherence right away;
