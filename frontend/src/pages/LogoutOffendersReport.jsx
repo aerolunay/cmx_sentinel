@@ -29,7 +29,7 @@ function statusLabel(r) {
 }
 
 function toCsv(rows) {
-  const headers = ['Shift Date', 'Agent', 'Agent ID', 'Group', 'PC', 'Scheduled End', 'Last Aux', 'Aux Started', 'Logged Out At', 'Detected At', 'Status'];
+  const headers = ['Shift Date', 'Agent', 'Agent ID', 'Group', 'PC', 'Scheduled End', 'Last Aux', 'Aux Started', 'Detected At', 'Status'];
   const lines = [headers.join(',')];
   for (const r of rows) {
     lines.push([
@@ -41,7 +41,6 @@ function toCsv(rows) {
       r.scheduledEnd,
       r.auxCode,
       r.segmentStarted,
-      r.closedAt,
       r.detectedAt,
       statusLabel(r),
     ].join(','));
@@ -166,7 +165,6 @@ export default function LogoutOffendersReport() {
                   <th>Scheduled End</th>
                   <th title="The aux code the agent was left in">Last Aux</th>
                   <th>Aux Started</th>
-                  <th title="Where the system ended the session - the scheduled end">Logged Out At</th>
                   <th title="When the hourly check found the session still open">Detected At</th>
                   <th>Status</th>
                 </tr>
@@ -181,7 +179,6 @@ export default function LogoutOffendersReport() {
                     <td>{formatDateTime(r.scheduledEnd)}</td>
                     <td>{r.auxCode}</td>
                     <td>{formatDateTime(r.segmentStarted)}</td>
-                    <td>{formatDateTime(r.closedAt)}</td>
                     <td>{formatDateTime(r.detectedAt)}</td>
                     <td style={{ fontWeight: 600, color: r.appRunning ? '#b91c1c' : '#c2660a' }}>{statusLabel(r)}</td>
                   </tr>
