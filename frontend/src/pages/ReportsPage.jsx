@@ -204,7 +204,7 @@ export default function ReportsPage() {
           Efficiency &amp; Adherence
         </button>
         <button className={tab === 'offenders' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('offenders')}>
-          Logout Offenders
+          Utilization Violations
         </button>
       </div>
       {tab === 'efficiency' ? <EfficiencyReport /> : <LogoutOffendersReport />}

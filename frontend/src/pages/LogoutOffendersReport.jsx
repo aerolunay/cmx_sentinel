@@ -101,7 +101,7 @@ export default function LogoutOffendersReport() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `logout-offenders_${dateFrom}_to_${dateTo}.csv`;
+    a.download = `utilization-violations_${dateFrom}_to_${dateTo}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
