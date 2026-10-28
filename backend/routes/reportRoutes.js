@@ -522,6 +522,59 @@ router.get("/efficiency", async (req, res) => {
   }
 });
 
+// Logout offenders: logins the server closed because they were still
+// open 6 hours after the shift ended (services/autoLogout.js), one row
+// each, filtered by the shift's date. appRunning = Sentinel was still
+// running on the PC (left running) rather than shut down without
+// logging out.
+router.get("/auto-logouts", async (req, res) => {
+  const { dateFrom, dateTo, agentId, groupId } = req.query;
+  if (!dateFrom || !dateTo) {
+    return res.status(400).json({ error: "dateFrom and dateTo are required." });
+  }
+
+  try {
+    const scopedGroupIds = await getScopedGroupIds(req);
+    if (scopedGroupIds !== null && scopedGroupIds.length === 0) {
+      return res.json([]);
+    }
+    const filter = buildConditions("al.shift_date", { dateFrom, dateTo, agentId, groupId, scopedGroupIds });
+    const [rows] = await db.query(
+      `SELECT al.auto_logout_id, a.agent_id, a.display_name, a.group_id, g.group_name, al.machine_name, al.aux_code,
+              DATE_FORMAT(al.shift_date, '%Y-%m-%d') AS shift_date,
+              DATE_FORMAT(al.scheduled_end_est, '${EST_FORMAT}') AS scheduled_end,
+              DATE_FORMAT(al.segment_started_est, '${EST_FORMAT}') AS segment_started,
+              DATE_FORMAT(al.closed_at_est, '${EST_FORMAT}') AS closed_at,
+              DATE_FORMAT(al.detected_at_est, '${EST_FORMAT}') AS detected_at,
+              al.app_running
+       FROM auto_logouts al
+       JOIN agents a ON a.agent_id = al.agent_id
+       LEFT JOIN agent_groups g ON g.group_id = a.group_id
+       WHERE ${filter.conditions.join(" AND ")}
+       ORDER BY al.shift_date DESC, a.display_name, al.scheduled_end_est`,
+      filter.params
+    );
+    res.json(rows.map((r) => ({
+      id: r.auto_logout_id,
+      date: r.shift_date,
+      agentId: r.agent_id,
+      displayName: r.display_name,
+      groupId: r.group_id,
+      groupName: r.group_name,
+      machineName: r.machine_name,
+      auxCode: r.aux_code,
+      scheduledEnd: r.scheduled_end,
+      segmentStarted: r.segment_started,
+      closedAt: r.closed_at,
+      detectedAt: r.detected_at,
+      appRunning: Boolean(r.app_running),
+    })));
+  } catch (err) {
+    console.error("Error generating logout offenders report:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
 // Today's recorded aux time (Eastern day, midnight to now) split into
 // one-hour buckets, per agent so the dashboard can filter by group/agent
 // client-side. All recorded time counts here, schedule or not - it's a

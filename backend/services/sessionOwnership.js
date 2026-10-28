@@ -113,4 +113,31 @@ function hasOwner(agentId) {
   return entries.has(agentId);
 }
 
-module.exports = { claim, attachConnection, detachConnection, release, hasOwner };
+/**
+ * Logs `machineName` out of `agentId`'s session from the server side -
+ * used when the agent's shift ended long ago and the login was left
+ * open (see services/autoLogout.js). Pushes force_logout over the live
+ * SSE connection if there is one, and drops the ownership entry either
+ * way. Returns true only if the machine was connected (Sentinel still
+ * running there) and the push was sent.
+ */
+function forceLogout(agentId, machineName, reason) {
+  const existing = entries.get(agentId);
+  if (!existing || existing.machineName !== machineName) {
+    return false;
+  }
+  let pushed = false;
+  if (existing.res && !existing.res.writableEnded) {
+    try {
+      existing.res.write(`event: force_logout\ndata: ${JSON.stringify({ reason })}\n\n`);
+      existing.res.end();
+      pushed = true;
+    } catch (err) {
+      console.error(`Error pushing force_logout to agent ${agentId} on ${machineName}:`, err);
+    }
+  }
+  entries.delete(agentId);
+  return pushed;
+}
+
+module.exports = { claim, attachConnection, detachConnection, release, hasOwner, forceLogout };

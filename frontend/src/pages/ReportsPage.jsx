@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import MetricsHelpModal from '../modals/MetricsHelpModal.jsx';
+import LogoutOffendersReport from './LogoutOffendersReport.jsx';
 
 // Same aux codes the desktop app tracks (see AgentState.cs) - shown as
 // columns in a fixed order regardless of which ones a given row
@@ -194,6 +195,24 @@ function toCsv(rows, isDaily) {
 }
 
 export default function ReportsPage() {
+  const [tab, setTab] = useState('efficiency');
+  return (
+    <>
+      <h2 style={{ margin: '0 0 12px' }}>Reports</h2>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, borderBottom: '1px solid #ddd' }}>
+        <button className={tab === 'efficiency' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('efficiency')}>
+          Efficiency &amp; Adherence
+        </button>
+        <button className={tab === 'offenders' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('offenders')}>
+          Logout Offenders
+        </button>
+      </div>
+      {tab === 'efficiency' ? <EfficiencyReport /> : <LogoutOffendersReport />}
+    </>
+  );
+}
+
+function EfficiencyReport() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -263,7 +282,7 @@ export default function ReportsPage() {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h2 style={{ margin: 0 }}>Reports</h2>
+          <h3 style={{ margin: 0 }}>Efficiency &amp; Adherence</h3>
           <button
             type="button"
             className="help-button"

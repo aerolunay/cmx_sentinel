@@ -203,14 +203,16 @@ router.post("/aux-events/close", async (req, res) => {
     // GREATEST guards a row that a fast-clocked PC opened BEFORE the
     // switch to server time: its start can be later than "now", and it
     // must not end up with an end before its start or a negative
-    // duration.
+    // duration. Only open rows: one the server already ended at the
+    // scheduled shift end (services/autoLogout.js) keeps that end when
+    // the PC finally sends its close days later.
     await db.query(
       `UPDATE aux_events
        SET ended_at_utc = GREATEST(started_at_utc, ?),
            ended_at_est = GREATEST(started_at_est, ?),
            duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_utc, ?)),
            logout_trigger = ?
-       WHERE event_id = ?`,
+       WHERE event_id = ? AND ended_at_utc IS NULL`,
       [endedAtUtcDate, toEasternSqlString(endedAtUtcDate), endedAtUtcDate, logoutTrigger || null, eventId]
     );
     res.json({ success: true });
