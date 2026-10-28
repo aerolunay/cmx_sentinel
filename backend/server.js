@@ -19,6 +19,7 @@ const auditRoutes = require("./routes/auditRoutes");
 const violationRoutes = require("./routes/violationRoutes");
 const desktopSyncRoutes = require("./routes/desktopSyncRoutes");
 const archiveRoutes = require("./routes/archiveRoutes");
+const { startAutoLogoutJob } = require("./services/autoLogout");
 
 const app = express();
 
@@ -105,4 +106,7 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`CMX Sentinel Admin backend listening on http://127.0.0.1:${PORT}`);
+  // Hourly: logins still open 6h after the shift ended are closed at the
+  // scheduled end - see services/autoLogout.js.
+  startAutoLogoutJob();
 });
