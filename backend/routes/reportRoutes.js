@@ -135,15 +135,22 @@ function overlapSeconds(startMs, endMs, windows) {
 // and after the last logout (leaving early) is never a "gap" and never
 // credited. Efficiency is unaffected - it stays based on real aux time.
 //
+// Only gaps up to MAX_RECONNECT_GAP_SECONDS are reconnects: a longer one
+// means the agent was simply gone (e.g. a login closed at the shift end
+// by autoLogout.js and the next one days later), so it's not a gap here.
+//
 // `sessions` must be sorted by startMs; endMs is null for a login with
 // no closed segment yet (still active). Returns one entry per gap; the
 // caller decides how much of it falls inside the schedule.
+const MAX_RECONNECT_GAP_SECONDS = 30 * 60;
+
 function findLoginGaps(sessions) {
   const gaps = [];
   for (let i = 1; i < sessions.length; i++) {
     const prev = sessions[i - 1];
     const next = sessions[i];
     if (prev.endMs == null || next.startMs <= prev.endMs) continue;
+    if (next.startMs - prev.endMs > MAX_RECONNECT_GAP_SECONDS * 1000) continue;
     gaps.push({ nextIndex: i, startMs: prev.endMs, endMs: next.startMs, afterIdle: prev.lastAuxCode === "Idle" });
   }
   return gaps;

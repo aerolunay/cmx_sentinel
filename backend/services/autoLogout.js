@@ -44,6 +44,12 @@ function mergeWindows(windows) {
   return merged;
 }
 
+// The shift a segment started at `startEst` belongs to, from one agent's
+// merged windows - see the header comment.
+function findOwningWindow(windows, startEst) {
+  return windows.find((w) => shiftEst(w.end, OVERRIDE_AFTER_HOURS) >= startEst);
+}
+
 async function runAutoLogout() {
   const nowEst = DateTime.now().setZone(EASTERN).toFormat(SQL_FORMAT);
   const cutoffEst = shiftEst(nowEst, -OVERRIDE_AFTER_HOURS);
@@ -74,8 +80,7 @@ async function runAutoLogout() {
 
   let closedCount = 0;
   for (const row of openRows) {
-    const window = (windowsByAgent.get(row.agent_id) || [])
-      .find((w) => shiftEst(w.end, OVERRIDE_AFTER_HOURS) >= row.start_est);
+    const window = findOwningWindow(windowsByAgent.get(row.agent_id) || [], row.start_est);
     if (!window || window.end > cutoffEst) continue;
 
     const closeEst = row.start_est > window.end ? row.start_est : window.end;
@@ -135,4 +140,6 @@ function startAutoLogoutJob() {
   setInterval(tick, CHECK_INTERVAL_MS);
 }
 
-module.exports = { runAutoLogout, startAutoLogoutJob, OVERRIDE_AFTER_HOURS };
+module.exports = {
+  runAutoLogout, startAutoLogoutJob, mergeWindows, findOwningWindow, shiftEst, OVERRIDE_AFTER_HOURS,
+};
