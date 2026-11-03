@@ -132,6 +132,13 @@ function startAutoLogoutJob() {
       await runAutoLogout();
     } catch (err) {
       console.error("Auto-logout check failed:", err);
+    }
+    try {
+      // Required here, not at the top: biometrics.js uses this file's
+      // shift matching.
+      await require("./biometrics").runOverstayCheck();
+    } catch (err) {
+      console.error("Overstay check failed:", err);
     } finally {
       running = false;
     }
