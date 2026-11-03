@@ -7,6 +7,7 @@ const { requireInternalApiKey } = require("../middleware/requireInternalApiKey")
 const { toEasternSqlString, getTodayUtcRangeEastern } = require("../services/easternTime");
 const { DateTime } = require("luxon");
 const sessionOwnership = require("../services/sessionOwnership");
+const biometrics = require("../services/biometrics");
 
 const router = express.Router();
 
@@ -125,15 +126,28 @@ const ORPHAN_CLOSE_MAX_HOURS = 12;
 // in the same login that is still treated as a straight switch.
 const AUX_SWITCH_MAX_GAP_SECONDS = 60;
 
+// A shift starts at the biometric Check-In and ends at the Check-Out
+// (see services/biometrics.js), so those two transitions are stamped
+// with the punch time the desktop got from /biometric-status rather
+// than arrival time. Only accepted within the window a real punch can
+// be in - never in the future.
+function biometricTime(value, now) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return null;
+  if (date > now || now - date > biometrics.OVERSTAY_HOURS * 3600 * 1000) return null;
+  return date;
+}
+
 router.post("/aux-events/open", async (req, res) => {
-  const { agentId, sessionId, machineName, auxCode, startedAtUtc } = req.body || {};
+  const { agentId, sessionId, machineName, auxCode, startedAtUtc, biometricStartedAtUtc } = req.body || {};
   if (!agentId || !sessionId || !machineName || !auxCode) {
     return res.status(400).json({ error: "agentId, sessionId, machineName, and auxCode are all required." });
   }
 
   try {
-    const startedAtUtcDate = new Date();
-    warnIfClockSkewed(machineName, startedAtUtc, startedAtUtcDate);
+    const now = new Date();
+    const startedAtUtcDate = biometricTime(biometricStartedAtUtc, now) || now;
+    warnIfClockSkewed(machineName, startedAtUtc, now);
     // A login has one segment at a time, so anything still open in this
     // session ends where the new one starts. Normally the PC already
     // closed it via /close; this covers a close request that never
@@ -191,15 +205,18 @@ router.post("/aux-events/open", async (req, res) => {
 });
 
 router.post("/aux-events/close", async (req, res) => {
-  const { eventId, logoutTrigger } = req.body || {};
+  const { eventId, logoutTrigger, biometricEndedAtUtc } = req.body || {};
   if (!eventId) {
     return res.status(400).json({ error: "eventId is required." });
   }
 
   try {
     // Server time, same as /open (the request's endedAtUtc is ignored;
-    // skew is already logged when the PC opens its next segment).
-    const endedAtUtcDate = new Date();
+    // skew is already logged when the PC opens its next segment) -
+    // except a shift ended by the biometric Check-Out, which ends at the
+    // punch.
+    const now = new Date();
+    const endedAtUtcDate = (logoutTrigger === "biometric" && biometricTime(biometricEndedAtUtc, now)) || now;
     // GREATEST guards a row that a fast-clocked PC opened BEFORE the
     // switch to server time: its start can be later than "now", and it
     // must not end up with an end before its start or a negative
@@ -218,6 +235,48 @@ router.post("/aux-events/close", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("Error closing aux event:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
+// ---------------------------------------------------------------------
+// Biometric shift status - polled by the desktop service every ~10s
+// while an agent is logged in to the app. The shift itself starts and
+// ends with the biometric punches, not with the app login.
+//   status "in":         start (or keep) the shift; resumeFromUtc is
+//                        where its aux session starts
+//   status "out"/"none": no shift - end one that's running at
+//                        punchedOutAtUtc (a Check-Out after it started)
+//   status "overstayed": no Check-Out 18h+ after the Check-In - the
+//                        open login is closed here at the scheduled end
+// ---------------------------------------------------------------------
+
+router.get("/biometric-status", async (req, res) => {
+  const { agentId } = req.query;
+  if (!agentId) {
+    return res.status(400).json({ error: "agentId is required." });
+  }
+
+  try {
+    const shift = await biometrics.getBiometricShift(agentId);
+    const body = {
+      status: shift.status,
+      shiftStartedAtUtc: shift.shiftStartedAt,
+      punchedOutAtUtc: shift.punchedOutAt,
+      resumeFromUtc: null,
+      closedAtUtc: null,
+    };
+    if (shift.status === "in") {
+      body.resumeFromUtc = await biometrics.resumeFrom(agentId, shift.shiftStartedAt);
+    } else if (shift.status === "overstayed") {
+      const closed = await biometrics.closeOverstayedShift(agentId, shift.shiftStartedAt, { pushLogout: false });
+      body.closedAtUtc = closed.closedAtUtc;
+    }
+    res.json(body);
+  } catch (err) {
+    // The desktop keeps its current state when this fails - a shift
+    // that's running isn't ended by a database hiccup.
+    console.error(`Error reading biometric status for agent ${agentId}:`, err);
     res.status(500).json({ error: "A server error occurred." });
   }
 });
