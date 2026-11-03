@@ -134,9 +134,16 @@ function startAutoLogoutJob() {
       console.error("Auto-logout check failed:", err);
     }
     try {
+      // Off unless BIOMETRIC_OVERSTAY_JOB=1 in backend/.env: it closes
+      // EVERY agent's open login with no biometric Check-Out 18h after
+      // the Check-In, including PCs still on desktop builds older than
+      // 2.3.3. While 2.3.3 is being tested, overstays are only handled
+      // for the PCs running it (their own /biometric-status check).
       // Required here, not at the top: biometrics.js uses this file's
       // shift matching.
-      await require("./biometrics").runOverstayCheck();
+      if (process.env.BIOMETRIC_OVERSTAY_JOB === "1") {
+        await require("./biometrics").runOverstayCheck();
+      }
     } catch (err) {
       console.error("Overstay check failed:", err);
     } finally {
