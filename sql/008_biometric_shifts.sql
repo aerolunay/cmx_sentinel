@@ -12,6 +12,10 @@
 ALTER TABLE aux_events
     ADD COLUMN logout_note VARCHAR(255) NULL AFTER logout_trigger;
 
--- The admin backend's account reads the punches. Match the host part to
--- however 'cmx_admin' is defined here (SELECT user, host FROM mysql.user).
-GRANT SELECT ON ph_timekeeping.device_attendance_logs TO 'cmx_admin'@'%';
+-- The admin backend's account (DB_USER in backend/.env - 'admin',
+-- connecting to 127.0.0.1) reads the punches. Skip this if
+-- SHOW GRANTS FOR 'admin'@'127.0.0.1' already shows SELECT or ALL
+-- PRIVILEGES ON *.*. Both hosts, since MySQL may match a 127.0.0.1
+-- connection to either entry.
+GRANT SELECT ON ph_timekeeping.device_attendance_logs TO 'admin'@'127.0.0.1';
+GRANT SELECT ON ph_timekeeping.device_attendance_logs TO 'admin'@'localhost';
