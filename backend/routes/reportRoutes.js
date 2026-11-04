@@ -5,6 +5,7 @@ const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
 const { getScopedGroupIds } = require("../services/groupScope");
 const { toEasternSqlString } = require("../services/easternTime");
+const { getLocation } = require("../services/agentLocation");
 const { DateTime } = require("luxon");
 
 const router = express.Router();
@@ -952,6 +953,9 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       groupId: cur.group_id,
       groupName: cur.group_name,
       auxCode: cur.aux_code,
+      // "onsite" / "remote" from the desktop's last office-network check,
+      // null if unknown (see services/agentLocation.js).
+      location: getLocation(cur.agent_id),
       auxSeconds: Math.max(0, Math.round((nowMs - toMs(cur.aux_started_est)) / 1000)),
       // Only for "NotLoggedIn"/"Scheduled" agents - their first scheduled start today.
       scheduledStart: cur.scheduled_start_est || null,

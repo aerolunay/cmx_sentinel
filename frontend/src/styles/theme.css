@@ -149,16 +149,17 @@ label { margin-right: 6px; }
 /* Dashboard: main content on the left, live agents panel on the right.
    Stacks (panel below) on narrower screens. */
 .dashboard-layout { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
-.dashboard-main { flex: 1 1 520px; min-width: 0; }
+.dashboard-main { flex: 1 1 420px; min-width: 0; }
 /* Live Agent Status above Not Logged In: both share the viewport height,
    each scrolling on its own, so the lower card stays reachable while the
-   panel is sticky. */
+   panel is sticky. The wider of the two columns - it's the one watched
+   all day. */
 .dashboard-side {
-  flex: 0 1 460px; min-width: 0; position: sticky; top: 16px;
+  flex: 0 1 640px; min-width: 0; position: sticky; top: 16px;
   display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 32px);
 }
 .dashboard-side > .live-agents { display: flex; flex-direction: column; min-height: 120px; }
-@media (max-width: 1200px) {
+@media (max-width: 1280px) {
   .dashboard-side { flex: 1 1 100%; position: static; max-height: none; }
   .dashboard-side .live-agents-scroll { max-height: 60vh; }
 }
@@ -173,6 +174,9 @@ label { margin-right: 6px; }
 .aux-badge { display: inline-block; color: white; border-radius: 4px; padding: 2px 6px; font-size: 12px; white-space: nowrap; }
 .live-agents-name { cursor: pointer; user-select: none; }
 .live-agents-name:hover { text-decoration: underline; }
+/* Name colour in Live Agent Status: where the agent is working from. */
+.live-agents-name.location-onsite > div:first-child { color: #1e3a8a; font-weight: 600; }
+.live-agents-name.location-remote > div:first-child { color: #3b9cf5; font-weight: 600; }
 
 /* Live agent detail modal */
 .live-detail { width: 720px; max-height: 90vh; overflow-y: auto; }
@@ -314,6 +318,29 @@ label { margin-right: 6px; }
 /* Live agent status: title on the left, aux filter on the right. */
 .live-agents-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .live-agents-head h3 { margin: 0; }
+.live-agents-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Onsite / Remote filter - a native select styled like the aux filter's pill. */
+.location-select {
+  padding: 5px 26px 5px 10px; border: 1px solid #d1d5db; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: #1a2b4a; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%231a2b4a' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+}
+.location-select:hover { border-color: #1a2b4a; }
+.location-select.filtered {
+  background-color: #1a2b4a; border-color: #1a2b4a; color: white;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+.location-select:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.location-select option { color: #1a2b4a; background: white; }
+.live-agents-legend { display: flex; gap: 10px; font-size: 11px; color: #666; margin: -6px 0 8px; }
+.live-agents-legend span::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px;
+  vertical-align: middle;
+}
+.live-agents-legend .legend-onsite::before { background: #1e3a8a; }
+.live-agents-legend .legend-remote::before { background: #3b9cf5; }
 
 /* Aux multi-select filter */
 .aux-select { position: relative; }

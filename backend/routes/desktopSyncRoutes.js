@@ -9,6 +9,7 @@ const { DateTime } = require("luxon");
 const sessionOwnership = require("../services/sessionOwnership");
 const biometrics = require("../services/biometrics");
 const { isOfficeIp } = require("../services/officeNetwork");
+const { recordLocation } = require("../services/agentLocation");
 const { sendInactivityAlertEmail } = require("../services/emailService");
 
 const router = express.Router();
@@ -361,6 +362,7 @@ router.get("/biometric-status", async (req, res) => {
 
   try {
     const onsite = isOfficeIp(req.ip);
+    recordLocation(agentId, onsite);
     const shift = await biometrics.getBiometricShift(agentId);
     const body = {
       status: shift.status,

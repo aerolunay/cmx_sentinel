@@ -23,9 +23,22 @@ function formatDateTime(sqlString) {
   return `${MONTH_NAMES[month - 1]} ${day}, ${hh % 12 || 12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`;
 }
 
-function AgentCell({ agent, onOpen }) {
+// Unknown location (desktop older than 2.3.3, or not heard from in the
+// last 2 minutes) counts as onsite - the default before remote mode.
+function locationOf(agent) {
+  return agent.location === 'remote' ? 'remote' : 'onsite';
+}
+
+// showLocation: colour the name by where the agent is working from
+// (dark blue onsite, light blue remote) - Live Agent Status only.
+function AgentCell({ agent, onOpen, showLocation = false }) {
+  const location = showLocation ? locationOf(agent) : null;
   return (
-    <td className="live-agents-name" title="Double-click for details" onDoubleClick={() => onOpen(agent.agentId)}>
+    <td
+      className={`live-agents-name${location ? ` location-${location}` : ''}`}
+      title={`${location ? `${location === 'remote' ? 'Remote' : 'Onsite'} - ` : ''}Double-click for details`}
+      onDoubleClick={() => onOpen(agent.agentId)}
+    >
       <div>{agent.displayName}</div>
       <div className="live-agents-group">
         {agent.agentId}
@@ -51,6 +64,8 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
   const [detailAgentId, setDetailAgentId] = useState(null);
   // Aux states unticked in the filter - empty means all are shown.
   const [hiddenStates, setHiddenStates] = useState(() => new Set());
+  // 'all', 'onsite' or 'remote'.
+  const [locationFilter, setLocationFilter] = useState('all');
 
   useEffect(() => {
     let cancelled = false;
@@ -98,9 +113,20 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
     .sort((a, b) => liveStateRank(a.auxCode) - liveStateRank(b.auxCode)
       || b.auxSeconds - a.auxSeconds
       || a.displayName.localeCompare(b.displayName)), [scopedAgents]);
+  const locationCounts = useMemo(() => {
+    const counts = { onsite: 0, remote: 0 };
+    for (const a of onlineAgents) counts[locationOf(a)]++;
+    return counts;
+  }, [onlineAgents]);
+  // The aux filter's counts follow the location filter, so they match
+  // what ticking a state would show.
+  const locationAgents = useMemo(
+    () => (locationFilter === 'all' ? onlineAgents : onlineAgents.filter((a) => locationOf(a) === locationFilter)),
+    [onlineAgents, locationFilter]
+  );
   const visibleAgents = useMemo(
-    () => onlineAgents.filter((a) => !hiddenStates.has(a.auxCode)),
-    [onlineAgents, hiddenStates]
+    () => locationAgents.filter((a) => !hiddenStates.has(a.auxCode)),
+    [locationAgents, hiddenStates]
   );
 
   // No Log In first (they count against adherence), then Logged Out.
@@ -113,9 +139,9 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
   // Every known logged-in state, plus any unknown one an agent is in right now.
   const stateCounts = useMemo(() => {
     const counts = {};
-    for (const a of onlineAgents) counts[a.auxCode] = (counts[a.auxCode] || 0) + 1;
+    for (const a of locationAgents) counts[a.auxCode] = (counts[a.auxCode] || 0) + 1;
     return counts;
-  }, [onlineAgents]);
+  }, [locationAgents]);
   const stateOptions = useMemo(
     () => [...new Set([...LIVE_STATE_ORDER, ...Object.keys(stateCounts)])]
       .filter((code) => !NOT_ON_STATES.has(code))
@@ -133,8 +159,26 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
             Live Agent Status
             {!loading && <span className="live-agents-count">{onlineAgents.length} logged in</span>}
           </h3>
-          <AuxMultiSelect options={stateOptions} hidden={hiddenStates} onChange={setHiddenStates} counts={stateCounts} />
+          <div className="live-agents-filters">
+            <select
+              className={`location-select${locationFilter === 'all' ? '' : ' filtered'}`}
+              value={locationFilter}
+              onChange={(e) => setLocationFilter(e.target.value)}
+              aria-label="Filter by onsite or remote"
+            >
+              <option value="all">Onsite &amp; Remote ({locationCounts.onsite + locationCounts.remote})</option>
+              <option value="onsite">Onsite ({locationCounts.onsite})</option>
+              <option value="remote">Remote ({locationCounts.remote})</option>
+            </select>
+            <AuxMultiSelect options={stateOptions} hidden={hiddenStates} onChange={setHiddenStates} counts={stateCounts} />
+          </div>
         </div>
+        {!loading && onlineAgents.length > 0 && (
+          <div className="live-agents-legend">
+            <span className="legend-onsite">Onsite</span>
+            <span className="legend-remote">Remote</span>
+          </div>
+        )}
 
         {error && <div className="error">{error}</div>}
 
@@ -143,7 +187,7 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
         ) : onlineAgents.length === 0 ? (
           <p style={{ fontSize: 14, color: '#999' }}>No agents logged in right now.</p>
         ) : visibleAgents.length === 0 ? (
-          <p style={{ fontSize: 14, color: '#999' }}>No agents in the selected states.</p>
+          <p style={{ fontSize: 14, color: '#999' }}>No agents match the selected filters.</p>
         ) : (
           <div className="live-agents-scroll">
             <table>
@@ -159,7 +203,7 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
               <tbody>
                 {visibleAgents.map((a) => (
                   <tr key={a.agentId}>
-                    <AgentCell agent={a} onOpen={setDetailAgentId} />
+                    <AgentCell agent={a} onOpen={setDetailAgentId} showLocation />
                     <td>
                       <span className="aux-badge" style={{ background: AUX_COLORS[a.auxCode] || '#6b7280' }}>
                         {formatAuxLabel(a.auxCode)}
