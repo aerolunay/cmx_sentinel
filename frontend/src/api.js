@@ -92,6 +92,12 @@ export const api = {
 
   getEfficiencyReport: (params) => request(`/api/reports/efficiency?${new URLSearchParams(params)}`),
   getAutoLogouts: (params) => request(`/api/reports/auto-logouts?${new URLSearchParams(params)}`),
+
+  listClinicVisits: (params) => request(`/api/clinic-visits?${new URLSearchParams(params)}`),
+  lookupClinicEmployee: (employeeId) => request(`/api/clinic-visits/employee/${encodeURIComponent(employeeId)}`),
+  createClinicVisit: (visit) => request('/api/clinic-visits', { method: 'POST', body: JSON.stringify(visit) }),
+  updateClinicVisit: (visitId, visit) =>
+    request(`/api/clinic-visits/${visitId}`, { method: 'PUT', body: JSON.stringify(visit) }),
   getHourlyAux: () => request('/api/reports/hourly-aux'),
   listLiveAgents: () => request('/api/reports/live-agents'),
   getLiveAgent: (agentId) => request(`/api/reports/live-agents/${encodeURIComponent(agentId)}`),

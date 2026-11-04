@@ -9,6 +9,8 @@ const ROLE_LABELS = {
   // generic "capitalize first letter" fallback below would otherwise
   // render it as "Tqa".
   tqa: 'TQA',
+  // Clinic staff - only see the Clinic Visits page.
+  clinic: 'Med / Clinic',
 };
 
 export function formatRole(role) {

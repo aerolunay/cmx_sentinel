@@ -19,6 +19,7 @@ const auditRoutes = require("./routes/auditRoutes");
 const violationRoutes = require("./routes/violationRoutes");
 const desktopSyncRoutes = require("./routes/desktopSyncRoutes");
 const archiveRoutes = require("./routes/archiveRoutes");
+const clinicRoutes = require("./routes/clinicRoutes");
 const { startAutoLogoutJob } = require("./services/autoLogout");
 
 const app = express();
@@ -83,7 +84,20 @@ app.use(
   })
 );
 
+// Med / Clinic users only ever use Clinic Visits (and logging in/out).
+// Several routers only check that someone is logged in (requireAuth),
+// so this keeps the role out of everything else here, in one place.
+const CLINIC_ALLOWED_PREFIXES = ["/api/auth/", "/api/clinic-visits"];
+app.use("/api", (req, res, next) => {
+  if (req.session && req.session.role === "clinic"
+      && !CLINIC_ALLOWED_PREFIXES.some((prefix) => req.originalUrl.startsWith(prefix))) {
+    return res.status(403).json({ error: "You do not have access to this." });
+  }
+  next();
+});
+
 app.use("/api/auth", authRoutes);
+app.use("/api/clinic-visits", clinicRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/agents", agentRoutes);
 app.use("/api/recordings", recordingRoutes);

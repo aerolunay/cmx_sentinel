@@ -9,7 +9,7 @@ const { GROUP_SCOPED_ROLES } = require("../services/groupScope");
 
 const router = express.Router();
 
-const VALID_ROLES = ["super_admin", "admin", "tqa", "supervisor", "manager"];
+const VALID_ROLES = ["super_admin", "admin", "tqa", "supervisor", "manager", "clinic"];
 const EMPLOYEE_ID_PATTERN = /^\d+$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

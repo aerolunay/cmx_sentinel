@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import MetricsHelpModal from '../modals/MetricsHelpModal.jsx';
 import LogoutOffendersReport from './LogoutOffendersReport.jsx';
+import ClinicVisitsReport from './ClinicVisitsReport.jsx';
 
 // Same aux codes the desktop app tracks (see AgentState.cs) - shown as
 // columns in a fixed order regardless of which ones a given row
 // actually has hours in, so the table doesn't reflow oddly row to row.
-const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle'];
+const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle', 'ClinicVisit'];
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -206,8 +207,13 @@ export default function ReportsPage() {
         <button className={tab === 'offenders' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('offenders')}>
           Utilization Violations
         </button>
+        <button className={tab === 'clinic' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('clinic')}>
+          Clinic Visits
+        </button>
       </div>
-      {tab === 'efficiency' ? <EfficiencyReport /> : <LogoutOffendersReport />}
+      {tab === 'efficiency' && <EfficiencyReport />}
+      {tab === 'offenders' && <LogoutOffendersReport />}
+      {tab === 'clinic' && <ClinicVisitsReport />}
     </>
   );
 }
