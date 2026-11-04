@@ -180,7 +180,7 @@ label { margin-right: 6px; }
   margin-right: 6px; vertical-align: middle; position: relative; top: -1px;
 }
 .location-dot.location-onsite { background: #1e3a8a; }
-.location-dot.location-remote { background: #166534; }
+.location-dot.location-remote { background: #60a5fa; }
 
 /* Live agent detail modal */
 .live-detail { width: 720px; max-height: 90vh; overflow-y: auto; }
