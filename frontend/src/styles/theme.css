@@ -174,9 +174,13 @@ label { margin-right: 6px; }
 .aux-badge { display: inline-block; color: white; border-radius: 4px; padding: 2px 6px; font-size: 12px; white-space: nowrap; }
 .live-agents-name { cursor: pointer; user-select: none; }
 .live-agents-name:hover { text-decoration: underline; }
-/* Name colour in Live Agent Status: where the agent is working from. */
-.live-agents-name.location-onsite > div:first-child { color: #1e3a8a; font-weight: 600; }
-.live-agents-name.location-remote > div:first-child { color: #3b9cf5; font-weight: 600; }
+/* Dot before the name in Live Agent Status: where the agent is working from. */
+.location-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle; position: relative; top: -1px;
+}
+.location-dot.location-onsite { background: #1e3a8a; }
+.location-dot.location-remote { background: #166534; }
 
 /* Live agent detail modal */
 .live-detail { width: 720px; max-height: 90vh; overflow-y: auto; }
@@ -334,13 +338,9 @@ label { margin-right: 6px; }
 }
 .location-select:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
 .location-select option { color: #1a2b4a; background: white; }
-.live-agents-legend { display: flex; gap: 10px; font-size: 11px; color: #666; margin: -6px 0 8px; }
-.live-agents-legend span::before {
-  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px;
-  vertical-align: middle;
-}
-.live-agents-legend .legend-onsite::before { background: #1e3a8a; }
-.live-agents-legend .legend-remote::before { background: #3b9cf5; }
+/* Onsite / Remote headcount under the Live Agent Status title. */
+.live-agents-legend { display: flex; gap: 14px; font-size: 12px; color: #555; margin: -6px 0 8px; }
+.live-agents-legend strong { color: #1a2b4a; }
 
 /* Aux multi-select filter */
 .aux-select { position: relative; }

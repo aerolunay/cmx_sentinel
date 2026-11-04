@@ -29,17 +29,21 @@ function locationOf(agent) {
   return agent.location === 'remote' ? 'remote' : 'onsite';
 }
 
-// showLocation: colour the name by where the agent is working from
-// (dark blue onsite, light blue remote) - Live Agent Status only.
+// showLocation: a dot before the name for where the agent is working
+// from (dark blue onsite, dark green remote) - Live Agent Status only.
 function AgentCell({ agent, onOpen, showLocation = false }) {
   const location = showLocation ? locationOf(agent) : null;
+  const locationLabel = location === 'remote' ? 'Remote' : 'Onsite';
   return (
     <td
-      className={`live-agents-name${location ? ` location-${location}` : ''}`}
-      title={`${location ? `${location === 'remote' ? 'Remote' : 'Onsite'} - ` : ''}Double-click for details`}
+      className="live-agents-name"
+      title={`${location ? `${locationLabel} - ` : ''}Double-click for details`}
       onDoubleClick={() => onOpen(agent.agentId)}
     >
-      <div>{agent.displayName}</div>
+      <div>
+        {location && <span className={`location-dot location-${location}`} aria-label={locationLabel} />}
+        {agent.displayName}
+      </div>
       <div className="live-agents-group">
         {agent.agentId}
         {agent.groupName && ` · ${agent.groupName}`}
@@ -175,8 +179,8 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
         </div>
         {!loading && onlineAgents.length > 0 && (
           <div className="live-agents-legend">
-            <span className="legend-onsite">Onsite</span>
-            <span className="legend-remote">Remote</span>
+            <span><span className="location-dot location-onsite" />Onsite: <strong>{locationCounts.onsite}</strong></span>
+            <span><span className="location-dot location-remote" />Remote: <strong>{locationCounts.remote}</strong></span>
           </div>
         )}
 
