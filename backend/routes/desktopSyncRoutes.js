@@ -8,6 +8,7 @@ const { toEasternSqlString, getTodayUtcRangeEastern } = require("../services/eas
 const { DateTime } = require("luxon");
 const sessionOwnership = require("../services/sessionOwnership");
 const biometrics = require("../services/biometrics");
+const { sendInactivityAlertEmail } = require("../services/emailService");
 
 const router = express.Router();
 
@@ -138,15 +139,33 @@ function biometricTime(value, now) {
   return date;
 }
 
+// Production auto-set to Idle after 5 minutes with no activity and an
+// unanswered 1-minute prompt (the desktop's InactivityMonitor): the
+// Production segment ends, and the Idle one starts, at the agent's last
+// activity - so those 6 minutes count as Idle. Only accepted within the
+// last INACTIVITY_MAX_MINUTES, never in the future.
+const INACTIVITY_MAX_MINUTES = 15;
+const INACTIVITY_NOTE = "Auto set to Idle due to inactivity";
+
+function inactivityTime(value, now) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return null;
+  if (date > now || now - date > INACTIVITY_MAX_MINUTES * 60 * 1000) return null;
+  return date;
+}
+
 router.post("/aux-events/open", async (req, res) => {
-  const { agentId, sessionId, machineName, auxCode, startedAtUtc, biometricStartedAtUtc } = req.body || {};
+  const {
+    agentId, sessionId, machineName, auxCode, startedAtUtc, biometricStartedAtUtc, inactivityStartedAtUtc,
+  } = req.body || {};
   if (!agentId || !sessionId || !machineName || !auxCode) {
     return res.status(400).json({ error: "agentId, sessionId, machineName, and auxCode are all required." });
   }
 
   try {
     const now = new Date();
-    const startedAtUtcDate = biometricTime(biometricStartedAtUtc, now) || now;
+    const inactiveSince = inactivityTime(inactivityStartedAtUtc, now);
+    const startedAtUtcDate = biometricTime(biometricStartedAtUtc, now) || inactiveSince || now;
     warnIfClockSkewed(machineName, startedAtUtc, now);
     // A login has one segment at a time, so anything still open in this
     // session ends where the new one starts. Normally the PC already
@@ -188,15 +207,24 @@ router.post("/aux-events/open", async (req, res) => {
         new Date(startedAtUtcDate.getTime() - AUX_SWITCH_MAX_GAP_SECONDS * 1000), startedAtUtcDate,
       ]
     );
-    const [result] = await db.query(
-      `INSERT INTO aux_events (agent_id, login_session_id, machine_name, aux_code, started_at_utc, started_at_est)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        agentId, sessionId, machineName, auxCode,
-        previous ? previous.ended_at_utc : startedAtUtcDate,
-        previous ? previous.ended_at_est : startedAtEst,
-      ]
-    );
+    // aux_note (sql/009) only written when there is one, so builds and
+    // databases without it keep working.
+    const values = [
+      agentId, sessionId, machineName, auxCode,
+      previous ? previous.ended_at_utc : startedAtUtcDate,
+      previous ? previous.ended_at_est : startedAtEst,
+    ];
+    const [result] = inactiveSince
+      ? await db.query(
+        `INSERT INTO aux_events (agent_id, login_session_id, machine_name, aux_code, started_at_utc, started_at_est, aux_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [...values, INACTIVITY_NOTE]
+      )
+      : await db.query(
+        `INSERT INTO aux_events (agent_id, login_session_id, machine_name, aux_code, started_at_utc, started_at_est)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        values
+      );
     res.json({ eventId: result.insertId });
   } catch (err) {
     console.error("Error opening aux event:", err);
@@ -205,7 +233,7 @@ router.post("/aux-events/open", async (req, res) => {
 });
 
 router.post("/aux-events/close", async (req, res) => {
-  const { eventId, logoutTrigger, biometricEndedAtUtc } = req.body || {};
+  const { eventId, logoutTrigger, biometricEndedAtUtc, inactivityEndedAtUtc } = req.body || {};
   if (!eventId) {
     return res.status(400).json({ error: "eventId is required." });
   }
@@ -214,9 +242,12 @@ router.post("/aux-events/close", async (req, res) => {
     // Server time, same as /open (the request's endedAtUtc is ignored;
     // skew is already logged when the PC opens its next segment) -
     // except a shift ended by the biometric Check-Out, which ends at the
-    // punch.
+    // punch, and Production auto-set to Idle, which ends at the last
+    // activity.
     const now = new Date();
-    const endedAtUtcDate = (logoutTrigger === "biometric" && biometricTime(biometricEndedAtUtc, now)) || now;
+    const endedAtUtcDate = (logoutTrigger === "biometric" && biometricTime(biometricEndedAtUtc, now))
+      || inactivityTime(inactivityEndedAtUtc, now)
+      || now;
     // GREATEST guards a row that a fast-clocked PC opened BEFORE the
     // switch to server time: its start can be later than "now", and it
     // must not end up with an end before its start or a negative
@@ -235,6 +266,65 @@ router.post("/aux-events/close", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("Error closing aux event:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
+// ---------------------------------------------------------------------
+// Inactivity alert - sent by the desktop service right after it auto-set
+// an agent's Production to Idle (see /aux-events/open's INACTIVITY_NOTE).
+// Emails every active Admin/Super Admin plus the Supervisors assigned
+// to the agent's group. Best-effort per recipient, like violation alerts.
+// ---------------------------------------------------------------------
+
+router.post("/inactivity-alert", async (req, res) => {
+  const { agentId, machineName, inactiveSinceUtc, idleSetAtUtc } = req.body || {};
+  const now = new Date();
+  const inactiveSince = inactivityTime(inactiveSinceUtc, now);
+  if (!agentId || !inactiveSince) {
+    return res.status(400).json({ error: "agentId and a recent inactiveSinceUtc are required." });
+  }
+
+  try {
+    const [[agent]] = await db.query(
+      `SELECT a.display_name, a.group_id, g.group_name
+       FROM agents a LEFT JOIN agent_groups g ON g.group_id = a.group_id
+       WHERE a.agent_id = ?`,
+      [agentId]
+    );
+    const [recipients] = await db.query(
+      `SELECT DISTINCT u.email FROM web_users u
+       LEFT JOIN web_user_groups ug ON ug.user_id = u.user_id
+       WHERE u.is_active = TRUE AND u.email IS NOT NULL AND u.email <> ''
+         AND (u.role IN ('admin', 'super_admin') OR (u.role = 'supervisor' AND ug.group_id = ?))`,
+      [agent?.group_id ?? null]
+    );
+
+    const idleSetAt = inactivityTime(idleSetAtUtc, now) || now;
+    const details = {
+      agentName: agent?.display_name ?? agentId,
+      agentId,
+      groupName: agent?.group_name ?? "(no group)",
+      machineName: machineName || "(unknown)",
+      inactiveSinceEst: toEasternSqlString(inactiveSince),
+      idleSetAtEst: toEasternSqlString(idleSetAt),
+      idleMinutes: Math.round((idleSetAt - inactiveSince) / 60000),
+    };
+
+    let sent = 0;
+    for (const { email } of recipients) {
+      try {
+        await sendInactivityAlertEmail(email, details);
+        sent++;
+      } catch (emailErr) {
+        console.error(`Failed to send inactivity alert to ${email}:`, emailErr);
+      }
+    }
+    console.warn(`Inactivity: agent ${agentId} on ${details.machineName} auto-set to Idle from ` +
+      `${details.inactiveSinceEst} ET - alerted ${sent} of ${recipients.length} recipient(s).`);
+    res.json({ sent });
+  } catch (err) {
+    console.error(`Error sending inactivity alert for agent ${agentId}:`, err);
     res.status(500).json({ error: "A server error occurred." });
   }
 });
