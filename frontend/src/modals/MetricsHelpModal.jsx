@@ -18,7 +18,7 @@ export default function MetricsHelpModal({ onClose }) {
           <div className="metrics-formula">
             Productive Hrs % = (Expected hours − Non-productive) ÷ Expected hours × 100
             <br />
-            Expected hours = Login hours − Break allowance
+            Expected hours = Login hours − Break allowance − Clinic Visit
             <br />
             Non-productive = Idle + Bio Break + Lunch/Break beyond the break allowance
           </div>
@@ -48,6 +48,13 @@ export default function MetricsHelpModal({ onClose }) {
               time for the first 30 minutes, then 30 minutes until Login − Allowance is larger) - e.g. 8 seconds of
               Idle in the first 20 minutes shows 99.3%, not 0%.
             </li>
+            <li>
+              <strong>Clinic Visit</strong> - Idle time during a visit logged by the clinic, from the time of visit to
+              the time released plus up to 10 minutes to get back. It is taken out of Idle and out of Expected hours,
+              so it neither counts as productive nor against the agent. Idle before the visit, or more than 10 minutes
+              after release, stays Idle. Other aux codes (Lunch, Break, ...) are never changed. A visit with no time
+              released yet counts up to now (at most 4 hours).
+            </li>
             <li>Between 0% and 100%. With no schedule loaded for the day it shows <strong>N/A</strong> - the time is kept and is calculated as soon as a schedule is added.</li>
           </ul>
           <div className="metrics-example">
@@ -55,6 +62,13 @@ export default function MetricsHelpModal({ onClose }) {
             Shift 8:00 AM - 5:00 PM. Inside it the agent logs Production 6.5h, Meeting 0.5h, Lunch 1h, Break 0.5h, Idle 0.5h (9h in total).
             <div className="metrics-calc">Expected = 9 − 1 = 8h · Non-productive = 0.5 Idle + 0.5 Lunch/Break over the 1h allowance = 1h</div>
             <div className="metrics-calc">(8 − 1) ÷ 8 = <strong>87.5%</strong></div>
+          </div>
+          <div className="metrics-example" style={{ marginTop: 8 }}>
+            <div className="metrics-example-title">Example - clinic visit</div>
+            Shift 9:00 AM - 6:00 PM, Lunch/Break within the 1h allowance. Idle from 3:25, clinic visit 3:30 - 4:00,
+            back in Production at 4:10.
+            <div className="metrics-calc">Clinic Visit = 3:30 - 4:10 = 40m (30m visit + 10m to get back) · Idle left = 3:25 - 3:30 = 5m</div>
+            <div className="metrics-calc">Expected = 9 − 1 − 0:40 = 7h 20m · (7h 20m − 5m) ÷ 7h 20m = 7h 15m ÷ 7h 20m = <strong>98.9%</strong></div>
           </div>
           <div className="metrics-example" style={{ marginTop: 8 }}>
             <div className="metrics-example-title">Example - short lunch doesn't cover Idle</div>

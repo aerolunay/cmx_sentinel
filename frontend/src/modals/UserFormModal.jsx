@@ -7,6 +7,7 @@ const ROLES = [
   { value: 'tqa', label: 'TQA' },
   { value: 'supervisor', label: 'Supervisor' },
   { value: 'manager', label: 'Manager' },
+  { value: 'clinic', label: 'Med / Clinic' },
 ];
 
 // Mirrors backend/services/groupScope.js - Supervisors pick one or more

@@ -364,3 +364,11 @@ label { margin-right: 6px; }
 .report-table td { font-variant-numeric: tabular-nums; }
 .report-time { white-space: nowrap; }
 .report-time-date { font-size: 10px; color: #888; white-space: nowrap; }
+
+/* Clinic Visits (Med / Clinic page and Reports tab) */
+.clinic-visits-table .clinic-visit-text { max-width: 280px; white-space: pre-wrap; word-break: break-word; }
+.clinic-visits-table .clinic-visit-group { font-size: 11px; color: #888; }
+.clinic-form-row { display: flex; gap: 12px; }
+.clinic-form-row > div { flex: 1 1 0; min-width: 0; }
+.clinic-form-note { margin: -8px 0 12px; font-size: 12px; color: #92400e; }
+.modal-box textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font: inherit; font-size: 14px; margin-bottom: 14px; resize: vertical; }

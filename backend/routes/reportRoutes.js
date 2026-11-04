@@ -7,6 +7,7 @@ const { getScopedGroupIds } = require("../services/groupScope");
 const { toEasternSqlString } = require("../services/easternTime");
 const { getLocation } = require("../services/agentLocation");
 const { hasWorkSetupColumn } = require("../services/workSetup");
+const { loadClinicWindows, clinicPieces, splitForClinic, CLINIC_AUX } = require("../services/clinicCredit");
 const { DateTime } = require("luxon");
 
 const router = express.Router();
@@ -67,13 +68,18 @@ function productiveHrs(auxSeconds, loginSeconds) {
   // than the login time itself (up to the allowance): the time logged in
   // for the first 30 minutes, then 30 minutes until Login - Allowance
   // catches up - no jump at either point.
-  const expectedSeconds = Math.max(
+  //
+  // Clinic visit time (Idle the clinic excused - see
+  // services/clinicCredit.js) is then taken off Expected: it's neither
+  // productive nor held against the agent. It stays in the login hours,
+  // so the break allowance doesn't shrink because of it.
+  const expectedSeconds = Math.max(0, Math.max(
     loginSeconds - result.allowanceSeconds,
     Math.min(loginSeconds, result.allowanceSeconds)
-  );
+  ) - (auxSeconds[CLINIC_AUX] || 0));
   result.expectedSeconds = expectedSeconds;
   result.creditSeconds = Math.max(0, expectedSeconds - nonProductiveSeconds);
-  result.pct = (result.creditSeconds / expectedSeconds) * 100;
+  result.pct = expectedSeconds > 0 ? (result.creditSeconds / expectedSeconds) * 100 : null;
   return result;
 }
 
@@ -105,6 +111,7 @@ function breakAdherence(auxSeconds, loginSeconds, shiftOver) {
 // thing TIMESTAMPDIFF does with them in the SQL below.
 const EST_FORMAT = "%Y-%m-%d %H:%i:%s";
 const toMs = (sqlString) => DateTime.fromSQL(sqlString, { zone: "utc" }).toMillis();
+const fromMs = (ms) => DateTime.fromMillis(ms, { zone: "utc" }).toFormat("yyyy-MM-dd HH:mm:ss");
 
 // An open aux_events row older than this is treated as a leftover from
 // a crashed/powered-off machine that never logged out, not a live agent.
@@ -478,6 +485,63 @@ router.get("/efficiency", async (req, res) => {
       getEntry(row).scheduledAuxSeconds[row.aux_code] = Number(row.overlap_seconds);
     }
 
+    // Query 8 - clinic visits: Idle inside a visit (+ the allowance after
+    // release) moves from Idle to ClinicVisit - see services/clinicCredit.js.
+    // The Idle segments are re-read for the agents who had a visit, and
+    // the excused part is moved in both the legacy totals (by the
+    // segment's start date, as Query 1 counts it) and the schedule-scoped
+    // ones (by each schedule window it falls in, as Query 3 counts it).
+    const nowMs = toMs(nowEst);
+    const clinicWindows = await loadClinicWindows(
+      [...new Set([...grouped.values()].map((e) => String(e.agentId)))],
+      DateTime.fromISO(dateFrom).minus({ days: 1 }).toISODate(),
+      DateTime.fromISO(dateTo).plus({ days: 1 }).toISODate(),
+      nowMs
+    );
+    if (clinicWindows.size > 0) {
+      const [idleRows] = await db.query(
+        `SELECT ae.agent_id, DATE_FORMAT(ae.started_at_est, '%Y-%m-%d') AS report_date,
+                DATE_FORMAT(ae.started_at_est, '${EST_FORMAT}') AS start_est,
+                DATE_FORMAT(COALESCE(ae.ended_at_est, ?), '${EST_FORMAT}') AS end_est
+         FROM aux_events ae
+         WHERE ae.aux_code = 'Idle' AND ae.agent_id IN (?)
+           AND DATE(ae.started_at_est) BETWEEN ? AND ?
+           AND (ae.ended_at_est IS NOT NULL OR ${RUNNING_SEGMENT_SQL})`,
+        [
+          nowEst, [...clinicWindows.keys()],
+          DateTime.fromISO(dateFrom).minus({ days: 1 }).toISODate(), dateTo, openCutoffEst,
+        ]
+      );
+      const scheduleWindowsByAgent = new Map();
+      for (const w of windowRows) {
+        const key = String(w.agent_id);
+        if (!scheduleWindowsByAgent.has(key)) scheduleWindowsByAgent.set(key, []);
+        scheduleWindowsByAgent.get(key).push({ shiftDate: w.shift_date, startMs: toMs(w.start_est), endMs: toMs(w.end_est) });
+      }
+      const moveToClinic = (auxSeconds, seconds) => {
+        const moved = Math.min(seconds, auxSeconds.Idle || 0);
+        if (moved <= 0) return;
+        auxSeconds.Idle -= moved;
+        auxSeconds[CLINIC_AUX] = (auxSeconds[CLINIC_AUX] || 0) + moved;
+      };
+
+      for (const row of idleRows) {
+        const agentKey = String(row.agent_id);
+        const pieces = clinicPieces(toMs(row.start_est), Math.min(toMs(row.end_est), nowMs), clinicWindows.get(agentKey));
+        if (pieces.length === 0) continue;
+
+        const legacyEntry = grouped.get(`${row.agent_id}|${row.report_date}`);
+        if (legacyEntry) {
+          moveToClinic(legacyEntry.legacyAuxSeconds, pieces.reduce((sum, p) => sum + (p.endMs - p.startMs) / 1000, 0));
+        }
+        for (const w of scheduleWindowsByAgent.get(agentKey) || []) {
+          const seconds = pieces.reduce((sum, p) => sum + overlapSeconds(p.startMs, p.endMs, [w]), 0);
+          const entry = grouped.get(`${row.agent_id}|${w.shiftDate}`);
+          if (seconds > 0 && entry) moveToClinic(entry.scheduledAuxSeconds, seconds);
+        }
+      }
+    }
+
     const report = [...grouped.values()].map((entry) => {
       // Schedule-scoped when a schedule exists for this agent/day,
       // otherwise fall back to the legacy unscoped totals - see the
@@ -656,25 +720,37 @@ router.get("/hourly-aux", async (req, res) => {
     const dayStartMs = toMs(dayStartEst);
     const nowMs = toMs(nowEst);
     const HOUR_MS = 3600 * 1000;
-    const buckets = new Map(); // "agentId|hour|auxCode" -> entry
+    const buckets = new Map(); // "agentId|hour|auxCode|workSetup" -> entry
+
+    // Idle the clinic excused shows as ClinicVisit - see services/clinicCredit.js.
+    const today = nowEst.slice(0, 10);
+    const clinicWindows = await loadClinicWindows(
+      [...new Set(rows.map((r) => String(r.agent_id)))],
+      DateTime.fromISO(today).minus({ days: 1 }).toISODate(),
+      DateTime.fromISO(today).plus({ days: 1 }).toISODate(),
+      nowMs
+    );
 
     for (const row of rows) {
-      let startMs = Math.max(toMs(row.started_est), dayStartMs);
-      const endMs = Math.min(row.ended_est ? toMs(row.ended_est) : nowMs, nowMs);
-      while (startMs < endMs) {
-        const hour = Math.floor((startMs - dayStartMs) / HOUR_MS);
-        const sliceEndMs = Math.min(endMs, dayStartMs + (hour + 1) * HOUR_MS);
-        // workSetup: "onsite" / "remote" the segment was recorded from,
-        // null if not recorded (counted as onsite) - for the Onsite/Remote filter.
-        const key = `${row.agent_id}|${hour}|${row.aux_code}|${row.work_setup || ""}`;
-        if (!buckets.has(key)) {
-          buckets.set(key, {
-            agentId: row.agent_id, groupId: row.group_id, hour, auxCode: row.aux_code,
-            workSetup: row.work_setup || null, seconds: 0,
-          });
+      const segmentStartMs = Math.max(toMs(row.started_est), dayStartMs);
+      const segmentEndMs = Math.min(row.ended_est ? toMs(row.ended_est) : nowMs, nowMs);
+      for (const piece of splitForClinic(row.aux_code, segmentStartMs, segmentEndMs, clinicWindows.get(String(row.agent_id)))) {
+        let startMs = piece.startMs;
+        while (startMs < piece.endMs) {
+          const hour = Math.floor((startMs - dayStartMs) / HOUR_MS);
+          const sliceEndMs = Math.min(piece.endMs, dayStartMs + (hour + 1) * HOUR_MS);
+          // workSetup: "onsite" / "remote" the segment was recorded from,
+          // null if not recorded (counted as onsite) - for the Onsite/Remote filter.
+          const key = `${row.agent_id}|${hour}|${piece.auxCode}|${row.work_setup || ""}`;
+          if (!buckets.has(key)) {
+            buckets.set(key, {
+              agentId: row.agent_id, groupId: row.group_id, hour, auxCode: piece.auxCode,
+              workSetup: row.work_setup || null, seconds: 0,
+            });
+          }
+          buckets.get(key).seconds += (sliceEndMs - startMs) / 1000;
+          startMs = sliceEndMs;
         }
-        buckets.get(key).seconds += (sliceEndMs - startMs) / 1000;
-        startMs = sliceEndMs;
       }
     }
 
@@ -892,6 +968,14 @@ async function loadLiveAgents(req, onlyAgentId = null) {
     [agentIds, earliestShiftDate, latestShiftDate]
   );
 
+  // Idle the clinic excused counts as ClinicVisit - see services/clinicCredit.js.
+  const clinicWindows = await loadClinicWindows(
+    agentIds.map(String),
+    DateTime.fromISO(earliestShiftDate).minus({ days: 1 }).toISODate(),
+    DateTime.fromISO(latestShiftDate).plus({ days: 1 }).toISODate(),
+    nowMs
+  );
+
   const result = [...current.values()].map((cur) => {
     const shiftStartMs = toMs(`${cur.shiftDate} 00:00:00`);
     const schedule = scheduleRows.filter((s) => s.agent_id === cur.agent_id && s.shift_date === cur.shiftDate);
@@ -915,24 +999,30 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       const startMs = toMs(ev.started_est);
       if (startMs < shiftStartMs) continue;
       const endMs = Math.min(ev.ended_est ? toMs(ev.ended_est) : nowMs, nowMs);
-      const logged = Math.max(0, (endMs - startMs) / 1000);
-      const counted = hasSchedule ? overlapSeconds(startMs, endMs, windows) : logged;
 
-      const totals = auxTotals.get(ev.aux_code) || { loggedSeconds: 0, countedSeconds: 0 };
-      totals.loggedSeconds += logged;
-      totals.countedSeconds += counted;
-      auxTotals.set(ev.aux_code, totals);
-      segments.push({
-        auxCode: ev.aux_code,
-        start: ev.started_est,
-        end: isCurrent ? null : ev.ended_est,
-        loggedSeconds: Math.round(logged),
-        countedSeconds: Math.round(counted),
-        machineName: ev.machine_name,
-      });
+      // Usually one piece; an Idle segment overlapping a clinic visit
+      // splits into its ClinicVisit and Idle parts.
+      const pieces = splitForClinic(ev.aux_code, startMs, endMs, clinicWindows.get(String(cur.agent_id)));
+      for (const piece of pieces) {
+        const logged = Math.max(0, (piece.endMs - piece.startMs) / 1000);
+        const counted = hasSchedule ? overlapSeconds(piece.startMs, piece.endMs, windows) : logged;
 
-      countedSeconds += counted;
-      if (PRODUCTIVE_AUX_CODES.includes(ev.aux_code)) productiveSeconds += counted;
+        const totals = auxTotals.get(piece.auxCode) || { loggedSeconds: 0, countedSeconds: 0 };
+        totals.loggedSeconds += logged;
+        totals.countedSeconds += counted;
+        auxTotals.set(piece.auxCode, totals);
+        segments.push({
+          auxCode: piece.auxCode,
+          start: pieces.length === 1 ? ev.started_est : fromMs(piece.startMs),
+          end: isCurrent && piece.endMs === endMs ? null : pieces.length === 1 ? ev.ended_est : fromMs(piece.endMs),
+          loggedSeconds: Math.round(logged),
+          countedSeconds: Math.round(counted),
+          machineName: ev.machine_name,
+        });
+
+        countedSeconds += counted;
+        if (PRODUCTIVE_AUX_CODES.includes(piece.auxCode)) productiveSeconds += counted;
+      }
 
       // One entry per desktop login (login_session_id) - its start is
       // the first aux segment, its end the last one to close.
@@ -981,16 +1071,23 @@ async function loadLiveAgents(req, onlyAgentId = null) {
     const loggedSeconds = [...auxTotals.values()].reduce((sum, t) => sum + t.loggedSeconds, 0);
     const productive = hasSchedule ? productiveHrs(countedAuxSeconds, countedSeconds) : null;
 
+    // In Idle during a clinic visit right now: shown as Clinic Visit,
+    // timed from when the visit (or the Idle, if later) started.
+    const auxStartedMs = toMs(cur.aux_started_est);
+    const clinicNow = cur.aux_code === "Idle"
+      ? (clinicWindows.get(String(cur.agent_id)) || []).find((w) => w.startMs <= nowMs && nowMs < w.endMs)
+      : null;
+
     return {
       agentId: cur.agent_id,
       displayName: cur.display_name,
       groupId: cur.group_id,
       groupName: cur.group_name,
-      auxCode: cur.aux_code,
+      auxCode: clinicNow ? CLINIC_AUX : cur.aux_code,
       // "onsite" / "remote" from the desktop's last office-network check,
       // null if unknown (see services/agentLocation.js).
       location: getLocation(cur.agent_id),
-      auxSeconds: Math.max(0, Math.round((nowMs - toMs(cur.aux_started_est)) / 1000)),
+      auxSeconds: Math.max(0, Math.round((nowMs - (clinicNow ? Math.max(clinicNow.startMs, auxStartedMs) : auxStartedMs)) / 1000)),
       // Only for "NotLoggedIn"/"Scheduled" agents - their first scheduled start today.
       scheduledStart: cur.scheduled_start_est || null,
       // Start of the agent's most recent desktop login; null if never.

@@ -15,7 +15,7 @@ import LiveAgentsPanel from '../components/LiveAgentsPanel.jsx';
 import DateRangePicker from '../components/DateRangePicker.jsx';
 
 const PRODUCTIVE_AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Coaching', 'Meeting', 'Training'];
-const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle'];
+const AUX_CODES = ['Production', 'Admin', 'Adhoc', 'Lunch', 'Break', 'Coaching', 'Meeting', 'Training', 'BioBreak', 'Idle', 'ClinicVisit'];
 
 // How often the Live view's stats reload (the live agents panel has its
 // own, faster refresh).

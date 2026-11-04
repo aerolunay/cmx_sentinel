@@ -16,7 +16,7 @@ const ADMIN_APP_URL = process.env.ADMIN_APP_URL || "https://sentinel.cmxinnovati
 // boundary, which isn't set up to share code) since this is the only
 // place the backend needs a human-readable role label. If a new role
 // value is ever added, update both copies.
-const ROLE_LABELS = { super_admin: "Super Admin", tqa: "TQA" };
+const ROLE_LABELS = { super_admin: "Super Admin", tqa: "TQA", clinic: "Med / Clinic" };
 function formatRole(role) {
   if (!role) return "";
   if (ROLE_LABELS[role]) return ROLE_LABELS[role];

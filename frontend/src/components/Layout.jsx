@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useAppVersion } from '../hooks/useAppVersion.js';
 import AboutModal from '../modals/AboutModal.jsx';
@@ -10,8 +10,17 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
   const canManageAgents = user?.role === 'admin' || user?.role === 'super_admin';
+  // Med / Clinic users only have the Clinic Visits page - every other
+  // path (the Dashboard home included) sends them there. The server
+  // blocks the role from every other API too (server.js).
+  const isClinic = user?.role === 'clinic';
+  const location = useLocation();
   const appVersion = useAppVersion();
   const [showAbout, setShowAbout] = useState(false);
+
+  if (isClinic && location.pathname !== '/clinic-visits') {
+    return <Navigate to="/clinic-visits" replace />;
+  }
 
   return (
     <div className="app-shell">
@@ -30,52 +39,60 @@ export default function Layout() {
             <span className="app-version">v {appVersion}</span>
           </div>
 
-          <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
-            Dashboard
-          </NavLink>
-          {/* Super Admin only - Users and Groups & Restrictions are no
-              longer reachable by regular Admin (enforced server-side
-              too via requireRole, this is just hiding links someone
-              couldn't use anyway). */}
-          {isSuperAdmin && (
-            <>
-              <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
-                Users
-              </NavLink>
-              <NavLink to="/groups" className={({ isActive }) => (isActive ? 'active' : '')}>
-                Groups &amp; Restrictions
-              </NavLink>
-            </>
-          )}
-          {/* Admin AND Super Admin both keep Agents. */}
-          {canManageAgents && (
-            <>
-              <NavLink to="/agents" className={({ isActive }) => (isActive ? 'active' : '')}>
-                Agents
-              </NavLink>
-              <NavLink to="/scheduler" className={({ isActive }) => (isActive ? 'active' : '')}>
-                Shift Scheduler
-              </NavLink>
-              <NavLink to="/violations" className={({ isActive }) => (isActive ? 'active' : '')}>
-                Violations
-              </NavLink>
-            </>
-          )}
-          <NavLink to="/recordings" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Recordings
-          </NavLink>
-          <NavLink to="/reports" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Reports
-          </NavLink>
-          {isSuperAdmin && (
-            <NavLink to="/audit-log" className={({ isActive }) => (isActive ? 'active' : '')}>
-              Audit Log
+          {isClinic ? (
+            <NavLink to="/clinic-visits" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Clinic Visits
             </NavLink>
-          )}
+          ) : (
+            <>
+              <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
+                Dashboard
+              </NavLink>
+              {/* Super Admin only - Users and Groups & Restrictions are no
+                  longer reachable by regular Admin (enforced server-side
+                  too via requireRole, this is just hiding links someone
+                  couldn't use anyway). */}
+              {isSuperAdmin && (
+                <>
+                  <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
+                    Users
+                  </NavLink>
+                  <NavLink to="/groups" className={({ isActive }) => (isActive ? 'active' : '')}>
+                    Groups &amp; Restrictions
+                  </NavLink>
+                </>
+              )}
+              {/* Admin AND Super Admin both keep Agents. */}
+              {canManageAgents && (
+                <>
+                  <NavLink to="/agents" className={({ isActive }) => (isActive ? 'active' : '')}>
+                    Agents
+                  </NavLink>
+                  <NavLink to="/scheduler" className={({ isActive }) => (isActive ? 'active' : '')}>
+                    Shift Scheduler
+                  </NavLink>
+                  <NavLink to="/violations" className={({ isActive }) => (isActive ? 'active' : '')}>
+                    Violations
+                  </NavLink>
+                </>
+              )}
+              <NavLink to="/recordings" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Recordings
+              </NavLink>
+              <NavLink to="/reports" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Reports
+              </NavLink>
+              {isSuperAdmin && (
+                <NavLink to="/audit-log" className={({ isActive }) => (isActive ? 'active' : '')}>
+                  Audit Log
+                </NavLink>
+              )}
 
-          <a href="#" onClick={(e) => { e.preventDefault(); setShowAbout(true); }} style={{ marginTop: 12 }}>
-            About
-          </a>
+              <a href="#" onClick={(e) => { e.preventDefault(); setShowAbout(true); }} style={{ marginTop: 12 }}>
+                About
+              </a>
+            </>
+          )}
         </aside>
 
         <main>

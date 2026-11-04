@@ -6,6 +6,9 @@ export const AUX_COLORS = {
   Production: '#1e3a8a', Admin: '#2563eb', Adhoc: '#3b82f6',
   Lunch: '#c2660a', Break: '#d97706', Coaching: '#0d9488', Meeting: '#166534', Training: '#16a34a',
   BioBreak: '#7c3aed', Idle: '#6b7280',
+  // Idle the clinic excused (clinic visit logs - see backend
+  // services/clinicCredit.js): not productive, but off Expected hours.
+  ClinicVisit: '#db2777',
   LoggedOut: '#374151',
   NotLoggedIn: '#b91c1c', Scheduled: '#9ca3af',
 };
@@ -16,7 +19,7 @@ export const AUX_COLORS = {
 // agents scheduled today with no login yet: shift started, then not yet.
 export const LIVE_STATE_ORDER = [
   'Production', 'Admin', 'Adhoc', 'Training', 'Meeting', 'Coaching',
-  'Idle', 'Lunch', 'Break', 'BioBreak', 'LoggedOut', 'NotLoggedIn', 'Scheduled',
+  'ClinicVisit', 'Idle', 'Lunch', 'Break', 'BioBreak', 'LoggedOut', 'NotLoggedIn', 'Scheduled',
 ];
 
 export function liveStateRank(auxCode) {
@@ -25,7 +28,9 @@ export function liveStateRank(auxCode) {
   return LIVE_STATE_ORDER.indexOf('LoggedOut') - 0.5; // after Bio Break, before Logged Out
 }
 
-const AUX_LABELS = { BioBreak: 'Bio Break', LoggedOut: 'Logged Out', NotLoggedIn: 'Not Logged In' };
+const AUX_LABELS = {
+  BioBreak: 'Bio Break', ClinicVisit: 'Clinic Visit', LoggedOut: 'Logged Out', NotLoggedIn: 'Not Logged In',
+};
 
 export function formatAuxLabel(auxCode) {
   return AUX_LABELS[auxCode] || auxCode;
