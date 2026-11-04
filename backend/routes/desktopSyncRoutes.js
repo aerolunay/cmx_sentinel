@@ -10,6 +10,7 @@ const sessionOwnership = require("../services/sessionOwnership");
 const biometrics = require("../services/biometrics");
 const { isOfficeIp } = require("../services/officeNetwork");
 const { recordLocation } = require("../services/agentLocation");
+const { workSetupForIp, hasWorkSetupColumn } = require("../services/workSetup");
 const { sendInactivityAlertEmail } = require("../services/emailService");
 
 const router = express.Router();
@@ -210,24 +211,24 @@ router.post("/aux-events/open", async (req, res) => {
         new Date(startedAtUtcDate.getTime() - AUX_SWITCH_MAX_GAP_SECONDS * 1000), startedAtUtcDate,
       ]
     );
-    // aux_note (sql/009) only written when there is one, so builds and
-    // databases without it keep working.
-    const values = [
-      agentId, sessionId, machineName, auxCode,
-      previous ? previous.ended_at_utc : startedAtUtcDate,
-      previous ? previous.ended_at_est : startedAtEst,
-    ];
-    const [result] = inactiveSince
-      ? await db.query(
-        `INSERT INTO aux_events (agent_id, login_session_id, machine_name, aux_code, started_at_utc, started_at_est, aux_note)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [...values, INACTIVITY_NOTE]
-      )
-      : await db.query(
-        `INSERT INTO aux_events (agent_id, login_session_id, machine_name, aux_code, started_at_utc, started_at_est)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        values
-      );
+    // aux_note (sql/009) and work_setup (sql/010) are only written when
+    // there's a value, so databases without those columns keep working.
+    const columns = {
+      agent_id: agentId,
+      login_session_id: sessionId,
+      machine_name: machineName,
+      aux_code: auxCode,
+      started_at_utc: previous ? previous.ended_at_utc : startedAtUtcDate,
+      started_at_est: previous ? previous.ended_at_est : startedAtEst,
+    };
+    if (inactiveSince) columns.aux_note = INACTIVITY_NOTE;
+    const workSetup = workSetupForIp(req.ip);
+    if (workSetup && (await hasWorkSetupColumn())) columns.work_setup = workSetup;
+    const [result] = await db.query(
+      `INSERT INTO aux_events (${Object.keys(columns).join(", ")})
+       VALUES (${Object.keys(columns).map(() => "?").join(", ")})`,
+      Object.values(columns)
+    );
     res.json({ eventId: result.insertId });
   } catch (err) {
     console.error("Error opening aux event:", err);

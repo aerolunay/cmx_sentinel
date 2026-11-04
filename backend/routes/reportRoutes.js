@@ -6,6 +6,7 @@ const { requireAuth } = require("../middleware/requireAuth");
 const { getScopedGroupIds } = require("../services/groupScope");
 const { toEasternSqlString } = require("../services/easternTime");
 const { getLocation } = require("../services/agentLocation");
+const { hasWorkSetupColumn } = require("../services/workSetup");
 const { DateTime } = require("luxon");
 
 const router = express.Router();
@@ -412,6 +413,31 @@ router.get("/efficiency", async (req, res) => {
       actualTimes.set(key, t);
     }
 
+    // Query 7 - onsite or remote per (agent, day): whichever the agent
+    // logged more time from that day (aux_events.work_setup, sql/010).
+    // null when nothing was recorded with it - the dashboard counts that
+    // as onsite.
+    const workSetupByDay = new Map(); // "agentId|date" -> "onsite" | "remote"
+    if (await hasWorkSetupColumn()) {
+      const [setupRows] = await db.query(
+        `SELECT ae.agent_id, DATE_FORMAT(ae.started_at_est, '%Y-%m-%d') AS report_date,
+                SUM(CASE WHEN ae.work_setup = 'remote'
+                    THEN COALESCE(ae.duration_seconds, GREATEST(0, TIMESTAMPDIFF(SECOND, ae.started_at_est, ?))) ELSE 0 END) AS remote_seconds,
+                SUM(CASE WHEN ae.work_setup = 'onsite'
+                    THEN COALESCE(ae.duration_seconds, GREATEST(0, TIMESTAMPDIFF(SECOND, ae.started_at_est, ?))) ELSE 0 END) AS onsite_seconds
+         FROM aux_events ae
+         JOIN agents a ON a.agent_id = ae.agent_id
+         WHERE ${legacyFilter.conditions.join(" AND ")} AND ae.work_setup IS NOT NULL
+         GROUP BY ae.agent_id, DATE_FORMAT(ae.started_at_est, '%Y-%m-%d')`,
+        [nowEst, nowEst, ...legacyFilter.params]
+      );
+      for (const row of setupRows) {
+        const remote = Number(row.remote_seconds);
+        const onsite = Number(row.onsite_seconds);
+        workSetupByDay.set(`${row.agent_id}|${row.report_date}`, remote > onsite ? "remote" : "onsite");
+      }
+    }
+
     // Merge all three into one (agent, day) map. Every key present in
     // scheduleRows has a real schedule for that day (even if
     // overlapRows has nothing for it, e.g. the agent never logged in
@@ -483,6 +509,8 @@ router.get("/efficiency", async (req, res) => {
         displayName: entry.displayName,
         groupId: entry.groupId,
         groupName: entry.groupName,
+        // "onsite" / "remote" (Query 7), null if not recorded.
+        workSetup: workSetupByDay.get(`${entry.agentId}|${entry.date}`) || null,
         hasSchedule: entry.hasSchedule,
         auxHours: Object.fromEntries(
           Object.entries(auxSeconds).map(([code, seconds]) => [code, seconds / 3600])
@@ -614,8 +642,9 @@ router.get("/hourly-aux", async (req, res) => {
       params.push(...scopedGroupIds);
     }
 
+    const withSetup = await hasWorkSetupColumn();
     const [rows] = await db.query(
-      `SELECT ae.agent_id, a.group_id, ae.aux_code,
+      `SELECT ae.agent_id, a.group_id, ae.aux_code, ${withSetup ? "ae.work_setup" : "NULL AS work_setup"},
               DATE_FORMAT(ae.started_at_est, '${EST_FORMAT}') AS started_est,
               DATE_FORMAT(ae.ended_at_est, '${EST_FORMAT}') AS ended_est
        FROM aux_events ae
@@ -635,9 +664,14 @@ router.get("/hourly-aux", async (req, res) => {
       while (startMs < endMs) {
         const hour = Math.floor((startMs - dayStartMs) / HOUR_MS);
         const sliceEndMs = Math.min(endMs, dayStartMs + (hour + 1) * HOUR_MS);
-        const key = `${row.agent_id}|${hour}|${row.aux_code}`;
+        // workSetup: "onsite" / "remote" the segment was recorded from,
+        // null if not recorded (counted as onsite) - for the Onsite/Remote filter.
+        const key = `${row.agent_id}|${hour}|${row.aux_code}|${row.work_setup || ""}`;
         if (!buckets.has(key)) {
-          buckets.set(key, { agentId: row.agent_id, groupId: row.group_id, hour, auxCode: row.aux_code, seconds: 0 });
+          buckets.set(key, {
+            agentId: row.agent_id, groupId: row.group_id, hour, auxCode: row.aux_code,
+            workSetup: row.work_setup || null, seconds: 0,
+          });
         }
         buckets.get(key).seconds += (sliceEndMs - startMs) / 1000;
         startMs = sliceEndMs;

@@ -322,22 +322,6 @@ label { margin-right: 6px; }
 /* Live agent status: title on the left, aux filter on the right. */
 .live-agents-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .live-agents-head h3 { margin: 0; }
-.live-agents-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-
-/* Onsite / Remote filter - a native select styled like the aux filter's pill. */
-.location-select {
-  padding: 5px 26px 5px 10px; border: 1px solid #d1d5db; border-radius: 999px;
-  font-size: 12px; font-weight: 600; color: #1a2b4a; cursor: pointer;
-  appearance: none; -webkit-appearance: none;
-  background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%231a2b4a' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
-}
-.location-select:hover { border-color: #1a2b4a; }
-.location-select.filtered {
-  background-color: #1a2b4a; border-color: #1a2b4a; color: white;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-}
-.location-select:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
-.location-select option { color: #1a2b4a; background: white; }
 /* Onsite / Remote headcount under the Live Agent Status title. */
 .live-agents-legend { display: flex; gap: 14px; font-size: 12px; color: #555; margin: -6px 0 8px; }
 .live-agents-legend strong { color: #1a2b4a; }

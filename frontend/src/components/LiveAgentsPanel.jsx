@@ -59,7 +59,10 @@ function AgentCell({ agent, onOpen, showLocation = false }) {
 // - Not Logged In: agents who logged out earlier today ("Logged Out")
 //   and agents scheduled today who haven't logged in ("No Log In"), with
 //   when they last logged in.
-export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
+// workSetupFilter ('all', 'onsite', 'remote') is the dashboard's
+// Onsite/Remote filter - it narrows Live Agent Status only, since agents
+// who aren't logged in have no current location.
+export default function LiveAgentsPanel({ groupFilter, agentFilter, workSetupFilter = 'all' }) {
   const [agents, setAgents] = useState([]);
   const [fetchedAt, setFetchedAt] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
@@ -68,8 +71,6 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
   const [detailAgentId, setDetailAgentId] = useState(null);
   // Aux states unticked in the filter - empty means all are shown.
   const [hiddenStates, setHiddenStates] = useState(() => new Set());
-  // 'all', 'onsite' or 'remote'.
-  const [locationFilter, setLocationFilter] = useState('all');
 
   useEffect(() => {
     let cancelled = false;
@@ -122,11 +123,11 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
     for (const a of onlineAgents) counts[locationOf(a)]++;
     return counts;
   }, [onlineAgents]);
-  // The aux filter's counts follow the location filter, so they match
-  // what ticking a state would show.
+  // The aux filter's counts follow the Onsite/Remote filter, so they
+  // match what ticking a state would show.
   const locationAgents = useMemo(
-    () => (locationFilter === 'all' ? onlineAgents : onlineAgents.filter((a) => locationOf(a) === locationFilter)),
-    [onlineAgents, locationFilter]
+    () => (workSetupFilter === 'all' ? onlineAgents : onlineAgents.filter((a) => locationOf(a) === workSetupFilter)),
+    [onlineAgents, workSetupFilter]
   );
   const visibleAgents = useMemo(
     () => locationAgents.filter((a) => !hiddenStates.has(a.auxCode)),
@@ -163,19 +164,7 @@ export default function LiveAgentsPanel({ groupFilter, agentFilter }) {
             Live Agent Status
             {!loading && <span className="live-agents-count">{onlineAgents.length} logged in</span>}
           </h3>
-          <div className="live-agents-filters">
-            <select
-              className={`location-select${locationFilter === 'all' ? '' : ' filtered'}`}
-              value={locationFilter}
-              onChange={(e) => setLocationFilter(e.target.value)}
-              aria-label="Filter by onsite or remote"
-            >
-              <option value="all">Onsite &amp; Remote ({locationCounts.onsite + locationCounts.remote})</option>
-              <option value="onsite">Onsite ({locationCounts.onsite})</option>
-              <option value="remote">Remote ({locationCounts.remote})</option>
-            </select>
-            <AuxMultiSelect options={stateOptions} hidden={hiddenStates} onChange={setHiddenStates} counts={stateCounts} />
-          </div>
+          <AuxMultiSelect options={stateOptions} hidden={hiddenStates} onChange={setHiddenStates} counts={stateCounts} />
         </div>
         {!loading && onlineAgents.length > 0 && (
           <div className="live-agents-legend">
