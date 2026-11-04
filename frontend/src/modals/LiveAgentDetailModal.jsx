@@ -22,6 +22,17 @@ function formatEasternTime(sqlString, shiftDate) {
   return `${month}/${day} ${clock}`;
 }
 
+// Same, to the second - the drill-down's aux change timestamps.
+function formatEasternTimeSeconds(sqlString, shiftDate) {
+  if (!sqlString) return '';
+  const [date, time] = sqlString.split(' ');
+  const [hh, mm, ss] = time.split(':').map(Number);
+  const clock = `${hh % 12 || 12}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`;
+  if (date === shiftDate) return clock;
+  const [, month, day] = date.split('-').map(Number);
+  return `${month}/${day} ${clock}`;
+}
+
 function formatShiftDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   // Noon UTC keeps the calendar day stable in any viewer timezone.
@@ -36,6 +47,7 @@ function formatShiftDate(dateStr) {
 export default function LiveAgentDetailModal({ agentId, onClose }) {
   const [agent, setAgent] = useState(null);
   const [error, setError] = useState('');
+  const [auxView, setAuxView] = useState('summary'); // 'summary' | 'drilldown'
 
   useEffect(() => {
     let cancelled = false;
@@ -101,7 +113,9 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
                       : `(${formatDuration(Math.max(0, d.expectedSeconds))} expected − ${formatDuration(d.nonProductiveSeconds)} non-productive) ÷ ${formatDuration(Math.max(0, d.expectedSeconds))} expected`}
                   {hasSchedule && d.expectedSeconds != null && (
                     <div>
-                      Expected = {formatDuration(d.countedSeconds)} logged − {formatDuration(d.breakAllowanceSeconds)} allowance.
+                      {Math.abs(d.expectedSeconds - (d.countedSeconds - d.breakAllowanceSeconds)) <= 1
+                        ? <>Expected = {formatDuration(d.countedSeconds)} logged − {formatDuration(d.breakAllowanceSeconds)} allowance.</>
+                        : <>Expected = {formatDuration(d.expectedSeconds)} - early in the shift it's never less than the time logged, up to the {formatDuration(d.breakAllowanceSeconds)} allowance.</>}
                       {' '}Non-productive = Idle + Bio Break{d.excessBreakSeconds > 0 ? ` + ${formatDuration(d.excessBreakSeconds)} Lunch/Break over the allowance` : ''}.
                     </div>
                   )}
@@ -200,7 +214,48 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
               </p>
             )}
 
-            <h3>Aux Time This Shift</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <h3>Aux Time This Shift</h3>
+              <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #ddd' }}>
+                <button type="button" className={auxView === 'summary' ? 'btn-tab active' : 'btn-tab'} onClick={() => setAuxView('summary')}>
+                  Summary
+                </button>
+                <button type="button" className={auxView === 'drilldown' ? 'btn-tab active' : 'btn-tab'} onClick={() => setAuxView('drilldown')}>
+                  Drill Down
+                </button>
+              </div>
+            </div>
+            {auxView === 'drilldown' ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Aux</th>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Duration</th>
+                    {hasSchedule && <th title="Part of the duration that falls inside scheduled hours">Within Schedule</th>}
+                    <th>PC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.segments.length === 0 && (
+                    <tr><td colSpan={hasSchedule ? 6 : 5}><em style={{ color: '#999' }}>No aux changes this shift.</em></td></tr>
+                  )}
+                  {d.segments.map((s) => (
+                    <tr key={`${s.start}-${s.auxCode}`} style={hasSchedule && s.countedSeconds === 0 ? { color: '#999' } : undefined}>
+                      <td>
+                        <span className="aux-badge" style={{ background: AUX_COLORS[s.auxCode] || '#6b7280' }}>{formatAuxLabel(s.auxCode)}</span>
+                      </td>
+                      <td>{formatEasternTimeSeconds(s.start, d.shiftDate)}</td>
+                      <td>{s.end == null ? <em style={{ color: '#166534' }}>Current</em> : formatEasternTimeSeconds(s.end, d.shiftDate)}</td>
+                      <td>{formatDuration(s.loggedSeconds)}</td>
+                      {hasSchedule && <td>{formatDuration(s.countedSeconds)}</td>}
+                      <td>{s.machineName || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
             <table>
               <thead>
                 <tr>
@@ -227,6 +282,7 @@ export default function LiveAgentDetailModal({ agentId, onClose }) {
                 </tr>
               </tbody>
             </table>
+            )}
             {hasSchedule && outsideScheduleSeconds > 0 && (
               <p className="live-detail-note">
                 {formatDuration(outsideScheduleSeconds)} was logged outside scheduled hours and doesn't count toward Productive Hrs or adherence.
