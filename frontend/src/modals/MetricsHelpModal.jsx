@@ -44,6 +44,9 @@ export default function MetricsHelpModal({ onClose }) {
                   <tr><td>over 12h</td><td>2h</td></tr>
                 </tbody>
               </table>
+              Early in a shift Expected hours is never less than the login hours, up to the allowance (the login
+              time for the first 30 minutes, then 30 minutes until Login − Allowance is larger) - e.g. 8 seconds of
+              Idle in the first 20 minutes shows 99.3%, not 0%.
             </li>
             <li>Between 0% and 100%. With no schedule loaded for the day it shows <strong>N/A</strong> - the time is kept and is calculated as soon as a schedule is added.</li>
           </ul>

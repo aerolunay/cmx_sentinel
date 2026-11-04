@@ -60,13 +60,15 @@ function productiveHrs(auxSeconds, loginSeconds) {
   };
   if (loginSeconds <= 0) return result;
 
-  const expectedSeconds = loginSeconds - result.allowanceSeconds;
-  if (expectedSeconds <= 0) {
-    // Logged in for no longer than the allowance itself - nothing to
-    // measure against, so it's all or nothing.
-    result.pct = nonProductiveSeconds > 0 ? 0 : 100;
-    return result;
-  }
+  // Early in a shift Login - Allowance is tiny or negative, so a few
+  // seconds of Idle at login would read as 0%. Expected is never less
+  // than the login time itself (up to the allowance): the time logged in
+  // for the first 30 minutes, then 30 minutes until Login - Allowance
+  // catches up - no jump at either point.
+  const expectedSeconds = Math.max(
+    loginSeconds - result.allowanceSeconds,
+    Math.min(loginSeconds, result.allowanceSeconds)
+  );
   result.expectedSeconds = expectedSeconds;
   result.creditSeconds = Math.max(0, expectedSeconds - nonProductiveSeconds);
   result.pct = (result.creditSeconds / expectedSeconds) * 100;
@@ -973,7 +975,7 @@ async function loadLiveAgents(req, onlyAgentId = null) {
         countedSeconds: Math.round(countedSeconds),
         productiveSeconds: Math.round(productiveSeconds),
         breakAllowanceSeconds: productive && countedSeconds > 0 ? productive.allowanceSeconds : null,
-        expectedSeconds: productive && countedSeconds > 0 ? Math.round(countedSeconds - productive.allowanceSeconds) : null,
+        expectedSeconds: productive && countedSeconds > 0 ? Math.round(productive.expectedSeconds) : null,
         nonProductiveSeconds: productive ? Math.round(productive.nonProductiveSeconds) : null,
         excessBreakSeconds: productive ? Math.round(productive.excessBreakSeconds) : null,
         creditedGapSeconds: Math.round(creditedGapSeconds),
