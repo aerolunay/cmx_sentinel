@@ -867,6 +867,7 @@ async function loadLiveAgents(req, onlyAgentId = null) {
     // counts toward efficiency/adherence (inside the schedule, or all of
     // it when there's no schedule).
     const auxTotals = new Map();
+    const segments = []; // each aux change, in order - the detail popup's drill-down
     const sessions = new Map();
     let countedSeconds = 0;
     let productiveSeconds = 0;
@@ -886,6 +887,14 @@ async function loadLiveAgents(req, onlyAgentId = null) {
       totals.loggedSeconds += logged;
       totals.countedSeconds += counted;
       auxTotals.set(ev.aux_code, totals);
+      segments.push({
+        auxCode: ev.aux_code,
+        start: ev.started_est,
+        end: isCurrent ? null : ev.ended_est,
+        loggedSeconds: Math.round(logged),
+        countedSeconds: Math.round(counted),
+        machineName: ev.machine_name,
+      });
 
       countedSeconds += counted;
       if (PRODUCTIVE_AUX_CODES.includes(ev.aux_code)) productiveSeconds += counted;
@@ -971,6 +980,7 @@ async function loadLiveAgents(req, onlyAgentId = null) {
             countedSeconds: Math.round(t.countedSeconds),
           }))
           .sort((a, b) => b.loggedSeconds - a.loggedSeconds),
+        segments,
         loggedSeconds: Math.round(loggedSeconds),
         countedSeconds: Math.round(countedSeconds),
         productiveSeconds: Math.round(productiveSeconds),
