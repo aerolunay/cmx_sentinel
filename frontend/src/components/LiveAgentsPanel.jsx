@@ -30,7 +30,7 @@ function locationOf(agent) {
 }
 
 // showLocation: a dot before the name for where the agent is working
-// from (dark blue onsite, dark green remote) - Live Agent Status only.
+// from (dark blue onsite, light blue remote) - Live Agent Status only.
 function AgentCell({ agent, onOpen, showLocation = false }) {
   const location = showLocation ? locationOf(agent) : null;
   const locationLabel = location === 'remote' ? 'Remote' : 'Onsite';
