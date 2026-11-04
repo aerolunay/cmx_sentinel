@@ -139,13 +139,14 @@ function biometricTime(value, now) {
   return date;
 }
 
-// Production auto-set to Idle after 5 minutes with no activity and an
+// Production, Admin or Adhoc auto-set to Idle after 5 minutes with no activity and an
 // unanswered 1-minute prompt (the desktop's InactivityMonitor): the
-// Production segment ends, and the Idle one starts, at the agent's last
+// working segment ends, and the Idle one starts, at the agent's last
 // activity - so those 6 minutes count as Idle. Only accepted within the
 // last INACTIVITY_MAX_MINUTES, never in the future.
 const INACTIVITY_MAX_MINUTES = 15;
 const INACTIVITY_NOTE = "Auto set to Idle due to inactivity";
+const INACTIVITY_WATCHED_AUX = ["Production", "Admin", "Adhoc"];
 
 function inactivityTime(value, now) {
   const date = value ? new Date(value) : null;
@@ -242,7 +243,7 @@ router.post("/aux-events/close", async (req, res) => {
     // Server time, same as /open (the request's endedAtUtc is ignored;
     // skew is already logged when the PC opens its next segment) -
     // except a shift ended by the biometric Check-Out, which ends at the
-    // punch, and Production auto-set to Idle, which ends at the last
+    // punch, and Production/Admin/Adhoc auto-set to Idle, which ends at the last
     // activity.
     const now = new Date();
     const endedAtUtcDate = (logoutTrigger === "biometric" && biometricTime(biometricEndedAtUtc, now))
@@ -272,13 +273,13 @@ router.post("/aux-events/close", async (req, res) => {
 
 // ---------------------------------------------------------------------
 // Inactivity alert - sent by the desktop service right after it auto-set
-// an agent's Production to Idle (see /aux-events/open's INACTIVITY_NOTE).
+// an agent's Production, Admin or Adhoc to Idle (see /aux-events/open's INACTIVITY_NOTE).
 // Emails every active Admin/Super Admin plus the Supervisors assigned
 // to the agent's group. Best-effort per recipient, like violation alerts.
 // ---------------------------------------------------------------------
 
 router.post("/inactivity-alert", async (req, res) => {
-  const { agentId, machineName, inactiveSinceUtc, idleSetAtUtc } = req.body || {};
+  const { agentId, machineName, auxCode, inactiveSinceUtc, idleSetAtUtc } = req.body || {};
   const now = new Date();
   const inactiveSince = inactivityTime(inactiveSinceUtc, now);
   if (!agentId || !inactiveSince) {
@@ -304,6 +305,9 @@ router.post("/inactivity-alert", async (req, res) => {
     const details = {
       agentName: agent?.display_name ?? agentId,
       agentId,
+      // Only the watched auxes go in the email; 2.3.4 desktops don't send
+      // one (they only watched Production).
+      auxName: INACTIVITY_WATCHED_AUX.includes(auxCode) ? auxCode : "Production",
       groupName: agent?.group_name ?? "(no group)",
       machineName: machineName || "(unknown)",
       inactiveSinceEst: toEasternSqlString(inactiveSince),

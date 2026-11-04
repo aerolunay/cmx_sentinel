@@ -120,15 +120,17 @@ async function sendViolationAlertEmail(toEmail, agentDisplayName, agentId, domai
   });
 }
 
-// d: agentName, agentId, groupName, machineName, inactiveSinceEst,
-// idleSetAtEst (Eastern wall-clock), idleMinutes.
+// d: agentName, agentId, auxName (Production/Admin/Adhoc), groupName,
+// machineName, inactiveSinceEst, idleSetAtEst (Eastern wall-clock),
+// idleMinutes.
 async function sendInactivityAlertEmail(toEmail, d) {
   const html = wrapEmailHtml(
     PRODUCT_NAME,
-    heading("Production auto-set to Idle - inactivity") +
-      paragraph(`<strong>${d.agentName}</strong> (${d.agentId}) was in Production with no activity for 5 minutes ` +
+    heading(`${d.auxName} auto-set to Idle - inactivity`) +
+      paragraph(`<strong>${d.agentName}</strong> (${d.agentId}) was in ${d.auxName} with no activity for 5 minutes ` +
         "and did not confirm the 1-minute prompt, so their aux was set to Idle.") +
       renderDetailsBox([
+        ["Aux ended", d.auxName],
         ["Group", d.groupName],
         ["PC", d.machineName],
         ["Inactive since", `${d.inactiveSinceEst} ET`],
@@ -141,9 +143,9 @@ async function sendInactivityAlertEmail(toEmail, d) {
     from: SMTP_FROM,
     to: toEmail,
     subject: `CMX Sentinel - Inactivity: ${d.agentName} auto-set to Idle`,
-    text: `${d.agentName} (${d.agentId}) was in Production with no activity for 5 minutes and did not confirm ` +
+    text: `${d.agentName} (${d.agentId}) was in ${d.auxName} with no activity for 5 minutes and did not confirm ` +
       "the 1-minute prompt, so their aux was set to Idle.\n\n" +
-      `Group: ${d.groupName}\nPC: ${d.machineName}\nInactive since: ${d.inactiveSinceEst} ET\n` +
+      `Aux ended: ${d.auxName}\nGroup: ${d.groupName}\nPC: ${d.machineName}\nInactive since: ${d.inactiveSinceEst} ET\n` +
       `Set to Idle at: ${d.idleSetAtEst} ET\nChanged to Idle: ${d.idleMinutes} minutes (from the last activity)\n\n` +
       "This is a notification only - the change is already recorded on the agent's aux log.",
     html,
