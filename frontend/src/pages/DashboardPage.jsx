@@ -35,6 +35,12 @@ function formatMinutes(minutes) {
 
 const selectStyle = { padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 };
 
+// Onsite/Remote filter: rows carry workSetup ("onsite" / "remote", see
+// /api/reports/efficiency and /hourly-aux); none recorded counts as onsite.
+function workSetupOf(row) {
+  return row.workSetup === 'remote' ? 'remote' : 'onsite';
+}
+
 export default function DashboardPage() {
   const { user, refreshUser } = useAuth();
   const [show2FAModal, setShow2FAModal] = useState(false);
@@ -46,6 +52,9 @@ export default function DashboardPage() {
   const [customRange, setCustomRange] = useState(null);
   const [groupFilter, setGroupFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
+  // 'all', 'onsite' or 'remote' - the numbers, charts and (live) the
+  // Live Agent Status list all follow it.
+  const [workSetupFilter, setWorkSetupFilter] = useState('all');
   const [rows, setRows] = useState([]);
   const [hourlyRows, setHourlyRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -136,9 +145,10 @@ export default function DashboardPage() {
     return rows.filter((r) => {
       if (groupFilter && String(r.groupId) !== groupFilter) return false;
       if (agentFilter && String(r.agentId) !== agentFilter) return false;
+      if (workSetupFilter !== 'all' && workSetupOf(r) !== workSetupFilter) return false;
       return true;
     });
-  }, [rows, groupFilter, agentFilter]);
+  }, [rows, groupFilter, agentFilter, workSetupFilter]);
 
   // Productive Hrs % = summed (Expected - Non-productive) ÷ summed
   // Expected, both worked out per agent/day server-side (see
@@ -205,8 +215,9 @@ export default function DashboardPage() {
   const filteredHourly = useMemo(() => hourlyRows.filter((r) => {
     if (groupFilter && String(r.groupId) !== groupFilter) return false;
     if (agentFilter && String(r.agentId) !== agentFilter) return false;
+    if (workSetupFilter !== 'all' && workSetupOf(r) !== workSetupFilter) return false;
     return true;
-  }), [hourlyRows, groupFilter, agentFilter]);
+  }), [hourlyRows, groupFilter, agentFilter, workSetupFilter]);
 
   // Per hour: each aux code's SHARE of all time recorded in that hour,
   // shown as minutes out of 60 - no agent count involved, so a column
@@ -326,6 +337,16 @@ export default function DashboardPage() {
             {agentOptions.map(([id, name]) => (
               <option key={id} value={id}>{name}</option>
             ))}
+          </select>
+          <select
+            value={workSetupFilter}
+            onChange={(e) => setWorkSetupFilter(e.target.value)}
+            style={selectStyle}
+            aria-label="Work setup"
+          >
+            <option value="all">Onsite &amp; Remote</option>
+            <option value="onsite">Onsite</option>
+            <option value="remote">Remote</option>
           </select>
         </div>
       </div>
@@ -467,7 +488,7 @@ export default function DashboardPage() {
 
         {isLive && (
           <div className="dashboard-side">
-            <LiveAgentsPanel groupFilter={groupFilter} agentFilter={agentFilter} />
+            <LiveAgentsPanel groupFilter={groupFilter} agentFilter={agentFilter} workSetupFilter={workSetupFilter} />
           </div>
         )}
       </div>
