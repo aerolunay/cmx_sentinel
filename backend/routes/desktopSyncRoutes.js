@@ -8,6 +8,7 @@ const { toEasternSqlString, getTodayUtcRangeEastern } = require("../services/eas
 const { DateTime } = require("luxon");
 const sessionOwnership = require("../services/sessionOwnership");
 const biometrics = require("../services/biometrics");
+const { isOfficeIp } = require("../services/officeNetwork");
 const { sendInactivityAlertEmail } = require("../services/emailService");
 
 const router = express.Router();
@@ -343,6 +344,13 @@ router.post("/inactivity-alert", async (req, res) => {
 //                        punchedOutAtUtc (a Check-Out after it started)
 //   status "overstayed": no Check-Out 18h+ after the Check-In - the
 //                        open login is closed here at the scheduled end
+//
+// onsite: whether this request came from the office network
+// (services/officeNetwork.js). Only onsite agents follow the biometric
+// punches; a desktop (2.3.6+) that gets onsite=false starts the shift at
+// the app login and ends it at the app logout instead. For them nothing
+// is closed here - their logins aren't tied to the punches. clientIp is
+// what the server saw, for the desktop's log.
 // ---------------------------------------------------------------------
 
 router.get("/biometric-status", async (req, res) => {
@@ -352,6 +360,7 @@ router.get("/biometric-status", async (req, res) => {
   }
 
   try {
+    const onsite = isOfficeIp(req.ip);
     const shift = await biometrics.getBiometricShift(agentId);
     const body = {
       status: shift.status,
@@ -359,10 +368,12 @@ router.get("/biometric-status", async (req, res) => {
       punchedOutAtUtc: shift.punchedOutAt,
       resumeFromUtc: null,
       closedAtUtc: null,
+      onsite,
+      clientIp: req.ip,
     };
     if (shift.status === "in") {
       body.resumeFromUtc = await biometrics.resumeFrom(agentId, shift.shiftStartedAt);
-    } else if (shift.status === "overstayed") {
+    } else if (shift.status === "overstayed" && onsite) {
       const closed = await biometrics.closeOverstayedShift(agentId, shift.shiftStartedAt, { pushLogout: false });
       body.closedAtUtc = closed.closedAtUtc;
     }
