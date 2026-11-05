@@ -4,6 +4,10 @@ const { DateTime } = require("luxon");
 const db = require("../config/db");
 const sessionOwnership = require("./sessionOwnership");
 
+// Superseded by the 18-hour rule in services/biometrics.js and off by
+// default (SCHEDULE_AUTO_LOGOUT=1 turns it back on) - its shift matching
+// (mergeWindows/findOwningWindow) is still used there.
+//
 // Logins left open long after the shift (the agent never logged out:
 // PC shut down, or Sentinel just left running) are closed by the
 // server. Every hour, any aux_events row still open OVERRIDE_AFTER_HOURS
@@ -128,20 +132,20 @@ function startAutoLogoutJob() {
   const tick = async () => {
     if (running) return;
     running = true;
+    // "No logout" now means 18 hours after time in, for onsite (biometric
+    // Check-In) and WFH (Sentinel login) alike - services/biometrics.js.
+    // This file's own rule (closed 6 hours after the scheduled end) is
+    // off unless SCHEDULE_AUTO_LOGOUT=1 in backend/.env; the 18-hour
+    // check runs unless OVERSTAY_JOB=0.
     try {
-      await runAutoLogout();
+      if (process.env.SCHEDULE_AUTO_LOGOUT === "1") await runAutoLogout();
     } catch (err) {
       console.error("Auto-logout check failed:", err);
     }
     try {
-      // Off unless BIOMETRIC_OVERSTAY_JOB=1 in backend/.env: it closes
-      // EVERY agent's open login with no biometric Check-Out 18h after
-      // the Check-In, including PCs still on desktop builds older than
-      // 2.3.3. While 2.3.3 is being tested, overstays are only handled
-      // for the PCs running it (their own /biometric-status check).
       // Required here, not at the top: biometrics.js uses this file's
       // shift matching.
-      if (process.env.BIOMETRIC_OVERSTAY_JOB === "1") {
+      if (process.env.OVERSTAY_JOB !== "0") {
         await require("./biometrics").runOverstayCheck();
       }
     } catch (err) {
