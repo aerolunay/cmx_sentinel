@@ -99,6 +99,7 @@ export const api = {
   updateClinicVisit: (visitId, visit) =>
     request(`/api/clinic-visits/${visitId}`, { method: 'PUT', body: JSON.stringify(visit) }),
   getHourlyAux: () => request('/api/reports/hourly-aux'),
+  getHourlyAdherence: () => request('/api/reports/hourly-adherence'),
   listLiveAgents: () => request('/api/reports/live-agents'),
   getLiveAgent: (agentId) => request(`/api/reports/live-agents/${encodeURIComponent(agentId)}`),
 

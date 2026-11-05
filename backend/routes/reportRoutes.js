@@ -761,6 +761,108 @@ router.get("/hourly-aux", async (req, res) => {
   }
 });
 
+// Today's schedule adherence by hour (Eastern day, midnight to now), per
+// agent so the dashboard can filter it like /hourly-aux: for each hour,
+// the scheduled seconds that have passed and how many of them the agent
+// was logged in for (any aux). Agents scheduled but not logged in count
+// with 0 logged. Unlike the daily Adherence %, there's no lunch/break
+// allowance or reconnect-gap credit here - those only make sense per
+// shift. workSetup: the agent's latest aux segment's (null = onsite).
+router.get("/hourly-adherence", async (req, res) => {
+  try {
+    const scopedGroupIds = await getScopedGroupIds(req);
+    if (scopedGroupIds !== null && scopedGroupIds.length === 0) {
+      return res.json([]);
+    }
+
+    const now = new Date();
+    const nowEst = toEasternSqlString(now);
+    const dayStartEst = `${nowEst.slice(0, 10)} 00:00:00`;
+    const openCutoffEst = toEasternSqlString(new Date(now.getTime() - MAX_OPEN_SEGMENT_HOURS * 3600 * 1000));
+
+    const conditions = ["s.scheduled_start < ?", "s.scheduled_end > ?"];
+    const params = [nowEst, dayStartEst];
+    if (scopedGroupIds !== null) {
+      conditions.push(`a.group_id IN (${scopedGroupIds.map(() => "?").join(",")})`);
+      params.push(...scopedGroupIds);
+    }
+    const [scheduleRows] = await db.query(
+      `SELECT s.agent_id, a.group_id,
+              DATE_FORMAT(s.scheduled_start, '${EST_FORMAT}') AS start_est,
+              DATE_FORMAT(s.scheduled_end, '${EST_FORMAT}') AS end_est
+       FROM agent_schedules s
+       JOIN agents a ON a.agent_id = s.agent_id
+       WHERE ${conditions.join(" AND ")}`,
+      params
+    );
+    if (scheduleRows.length === 0) return res.json([]);
+
+    const withSetup = await hasWorkSetupColumn();
+    const [eventRows] = await db.query(
+      `SELECT ae.agent_id, ${withSetup ? "ae.work_setup" : "NULL AS work_setup"},
+              DATE_FORMAT(ae.started_at_est, '${EST_FORMAT}') AS started_est,
+              DATE_FORMAT(ae.ended_at_est, '${EST_FORMAT}') AS ended_est
+       FROM aux_events ae
+       WHERE ae.agent_id IN (?) AND ae.started_at_est < ?
+         AND (ae.ended_at_est > ? OR ${RUNNING_SEGMENT_SQL})
+       ORDER BY ae.started_at_est`,
+      [[...new Set(scheduleRows.map((s) => s.agent_id))], nowEst, dayStartEst, openCutoffEst]
+    );
+
+    const dayStartMs = toMs(dayStartEst);
+    const nowMs = toMs(nowEst);
+    const HOUR_MS = 3600 * 1000;
+    const buckets = new Map(); // "agentId|hour" -> entry
+    const workSetupByAgent = new Map();
+    for (const ev of eventRows) workSetupByAgent.set(ev.agent_id, ev.work_setup || null);
+
+    const windowsByAgent = new Map();
+    for (const s of scheduleRows) {
+      if (!windowsByAgent.has(s.agent_id)) windowsByAgent.set(s.agent_id, []);
+      windowsByAgent.get(s.agent_id).push({ groupId: s.group_id, startMs: toMs(s.start_est), endMs: toMs(s.end_est) });
+    }
+
+    // Adds [startMs, endMs) - clipped to today so far - hour by hour.
+    function addByHour(agentId, groupId, startMs, endMs, field) {
+      let cursor = Math.max(startMs, dayStartMs);
+      const end = Math.min(endMs, nowMs);
+      while (cursor < end) {
+        const hour = Math.floor((cursor - dayStartMs) / HOUR_MS);
+        const sliceEnd = Math.min(end, dayStartMs + (hour + 1) * HOUR_MS);
+        const key = `${agentId}|${hour}`;
+        if (!buckets.has(key)) {
+          buckets.set(key, {
+            agentId, groupId, hour, workSetup: workSetupByAgent.get(agentId) || null,
+            scheduledSeconds: 0, loggedSeconds: 0,
+          });
+        }
+        buckets.get(key)[field] += (sliceEnd - cursor) / 1000;
+        cursor = sliceEnd;
+      }
+    }
+
+    for (const [agentId, windows] of windowsByAgent) {
+      for (const w of windows) addByHour(agentId, w.groupId, w.startMs, w.endMs, "scheduledSeconds");
+    }
+    for (const ev of eventRows) {
+      const startMs = toMs(ev.started_est);
+      const endMs = ev.ended_est ? toMs(ev.ended_est) : nowMs;
+      for (const w of windowsByAgent.get(ev.agent_id) || []) {
+        const s = Math.max(startMs, w.startMs);
+        const e = Math.min(endMs, w.endMs);
+        if (e > s) addByHour(ev.agent_id, w.groupId, s, e, "loggedSeconds");
+      }
+    }
+
+    res.json([...buckets.values()].map((b) => ({
+      ...b, scheduledSeconds: Math.round(b.scheduledSeconds), loggedSeconds: Math.round(b.loggedSeconds),
+    })));
+  } catch (err) {
+    console.error("Error loading hourly adherence:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
 // Agents currently logged in to the desktop app (plus those who logged
 // out earlier today, as aux "LoggedOut", and those scheduled today who
 // haven't logged in, as "NotLoggedIn"/"Scheduled"), with their current aux and

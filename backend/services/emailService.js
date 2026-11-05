@@ -127,7 +127,7 @@ async function sendInactivityAlertEmail(toEmail, d) {
   const html = wrapEmailHtml(
     PRODUCT_NAME,
     heading(`${d.auxName} auto-set to Idle - inactivity`) +
-      paragraph(`<strong>${d.agentName}</strong> (${d.agentId}) was in ${d.auxName} with no activity for 5 minutes ` +
+      paragraph(`<strong>${d.agentName}</strong> (${d.agentId}) was in ${d.auxName} with no activity for 10 minutes ` +
         "and did not confirm the 1-minute prompt, so their aux was set to Idle.") +
       renderDetailsBox([
         ["Aux ended", d.auxName],
@@ -143,7 +143,7 @@ async function sendInactivityAlertEmail(toEmail, d) {
     from: SMTP_FROM,
     to: toEmail,
     subject: `CMX Sentinel - Inactivity: ${d.agentName} auto-set to Idle`,
-    text: `${d.agentName} (${d.agentId}) was in ${d.auxName} with no activity for 5 minutes and did not confirm ` +
+    text: `${d.agentName} (${d.agentId}) was in ${d.auxName} with no activity for 10 minutes and did not confirm ` +
       "the 1-minute prompt, so their aux was set to Idle.\n\n" +
       `Aux ended: ${d.auxName}\nGroup: ${d.groupName}\nPC: ${d.machineName}\nInactive since: ${d.inactiveSinceEst} ET\n` +
       `Set to Idle at: ${d.idleSetAtEst} ET\nChanged to Idle: ${d.idleMinutes} minutes (from the last activity)\n\n` +

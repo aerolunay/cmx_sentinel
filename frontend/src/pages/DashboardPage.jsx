@@ -57,6 +57,7 @@ export default function DashboardPage() {
   const [workSetupFilter, setWorkSetupFilter] = useState('all');
   const [rows, setRows] = useState([]);
   const [hourlyRows, setHourlyRows] = useState([]);
+  const [hourlyAdherenceRows, setHourlyAdherenceRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -85,13 +86,15 @@ export default function DashboardPage() {
         // client-side below so switching groups is instant and doesn't
         // need a new request, and so the group dropdown itself can be
         // built from whatever groups actually appear in this range's data.
-        const [data, hourly] = await Promise.all([
+        const [data, hourly, hourlyAdherence] = await Promise.all([
           api.getEfficiencyReport(range),
           isLive ? api.getHourlyAux() : [],
+          isLive ? api.getHourlyAdherence() : [],
         ]);
         if (cancelled) return;
         setRows(data);
         setHourlyRows(hourly);
+        setHourlyAdherenceRows(hourlyAdherence);
         setError('');
       } catch (err) {
         if (!cancelled) setError(err.message);
@@ -167,27 +170,6 @@ export default function DashboardPage() {
     return expectedHours > 0 ? (creditHours / expectedHours) * 100 : null;
   }
 
-  // One point per day, all agents in the current filters together. Days
-  // with nothing to measure (no schedule, or not logged in yet) are left
-  // off rather than plotted as 0%.
-  const productiveTrend = useMemo(() => {
-    const byDay = new Map();
-    for (const r of filteredRows) {
-      if (!byDay.has(r.date)) byDay.set(r.date, []);
-      byDay.get(r.date).push(r);
-    }
-    return [...byDay.entries()]
-      .map(([date, dayRows]) => ({ date, pct: sumProductive(dayRows) }))
-      .filter((d) => d.pct != null)
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map((d) => ({
-        day: formatDayShort(d.date), // ranges can span months, so "Oct 3" rather than a bare day number
-        productive: Number(d.pct.toFixed(2)),
-      }));
-  }, [filteredRows]);
-
-  const overallProductive = useMemo(() => sumProductive(filteredRows), [filteredRows]);
-
   // Same "sum first, then divide" approach, but only over days that
   // actually have a schedule loaded (hasSchedule: true) - a day
   // without one simply doesn't contribute to either side of the
@@ -195,18 +177,41 @@ export default function DashboardPage() {
   // elapsedScheduledHours - only the scheduled time elapsed so far (see
   // /api/reports/efficiency), so the rest of today and future days add
   // nothing to the denominator.
-  const overallAdherence = useMemo(() => {
+  function sumAdherence(list) {
     let scheduledHours = 0;
     let scheduledLoggedHours = 0;
-    let hasAnySchedule = false;
-    for (const r of filteredRows) {
+    for (const r of list) {
       if (!r.hasSchedule) continue;
-      hasAnySchedule = true;
       scheduledHours += r.elapsedScheduledHours ?? r.scheduledHours ?? 0;
       scheduledLoggedHours += r.adherentHours ?? r.totalHours; // includes credited reconnect gaps
     }
-    return hasAnySchedule && scheduledHours > 0 ? (scheduledLoggedHours / scheduledHours) * 100 : null;
+    return scheduledHours > 0 ? (scheduledLoggedHours / scheduledHours) * 100 : null;
+  }
+
+  // One point per day, all agents in the current filters together, for
+  // Productive Hrs % and Adherence %. A day with nothing to measure for a
+  // line (no schedule, or not logged in yet) leaves a gap in that line
+  // rather than a 0% point; days with neither are left off.
+  const productiveTrend = useMemo(() => {
+    const byDay = new Map();
+    for (const r of filteredRows) {
+      if (!byDay.has(r.date)) byDay.set(r.date, []);
+      byDay.get(r.date).push(r);
+    }
+    const round = (pct) => (pct == null ? null : Number(pct.toFixed(2)));
+    return [...byDay.entries()]
+      .map(([date, dayRows]) => ({ date, productive: sumProductive(dayRows), adherence: sumAdherence(dayRows) }))
+      .filter((d) => d.productive != null || d.adherence != null)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((d) => ({
+        day: formatDayShort(d.date), // ranges can span months, so "Oct 3" rather than a bare day number
+        productive: round(d.productive),
+        adherence: round(d.adherence),
+      }));
   }, [filteredRows]);
+
+  const overallProductive = useMemo(() => sumProductive(filteredRows), [filteredRows]);
+  const overallAdherence = useMemo(() => sumAdherence(filteredRows), [filteredRows]);
 
   // Live view: recorded aux time per hour of today. The hours shown run
   // from the first to the last hour anything was recorded in (empty
@@ -259,6 +264,40 @@ export default function DashboardPage() {
     });
     return { hourlyAux: data, hourlyCodes: ordered };
   }, [filteredHourly]);
+
+  // Live trend line per hour: the productive share (from hourlyAux) and
+  // schedule adherence - logged-in seconds over scheduled seconds passed
+  // in that hour (/hourly-adherence; no lunch/break allowance per hour).
+  // Hours run over everything either line has.
+  const hourlyTrend = useMemo(() => {
+    const adherenceByHour = new Map();
+    for (const r of hourlyAdherenceRows) {
+      if (groupFilter && String(r.groupId) !== groupFilter) continue;
+      if (agentFilter && String(r.agentId) !== agentFilter) continue;
+      if (workSetupFilter !== 'all' && workSetupOf(r) !== workSetupFilter) continue;
+      const h = adherenceByHour.get(r.hour) || { scheduled: 0, logged: 0 };
+      h.scheduled += r.scheduledSeconds;
+      h.logged += r.loggedSeconds;
+      adherenceByHour.set(r.hour, h);
+    }
+    const productiveByLabel = new Map(hourlyAux.map((e) => [e.hour, e.productivePct]));
+    const hours = [
+      ...adherenceByHour.keys(),
+      ...[...new Set(filteredHourly.map((r) => r.hour))],
+    ];
+    if (hours.length === 0) return [];
+    const data = [];
+    for (let h = Math.min(...hours); h <= Math.max(...hours); h++) {
+      const a = adherenceByHour.get(h);
+      const label = formatHourLabel(h);
+      data.push({
+        hour: label,
+        productivePct: productiveByLabel.get(label) ?? null,
+        adherencePct: a && a.scheduled > 0 ? Number(((a.logged / a.scheduled) * 100).toFixed(2)) : null,
+      });
+    }
+    return data;
+  }, [hourlyAdherenceRows, hourlyAux, filteredHourly, groupFilter, agentFilter, workSetupFilter]);
 
   // Each aux code's SHARE of total logged time, not raw hours - easier
   // to compare across agents/groups of different total hours this way.
@@ -425,16 +464,17 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="dashboard-card">
-                    <h3>Productive Share by Hour (Today)</h3>
-                    {hourlyAux.length === 0 ? (
-                      <p style={{ fontSize: 14, color: '#999' }}>No aux time recorded yet today.</p>
+                    <h3>Productive Share &amp; Adherence by Hour (Today)</h3>
+                    {hourlyTrend.length === 0 ? (
+                      <p style={{ fontSize: 14, color: '#999' }}>No aux or scheduled time yet today.</p>
                     ) : (
                       <ResponsiveContainer width="100%" height={260}>
-                        <LineChart data={hourlyAux} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                        <LineChart data={hourlyTrend} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                           <XAxis dataKey="hour" fontSize={12} />
                           <YAxis domain={[0, 100]} unit="%" fontSize={12} />
                           <Tooltip formatter={(value) => `${value}%`} />
+                          <Legend wrapperStyle={{ fontSize: 12 }} />
                           <Line
                             type="monotone"
                             dataKey="productivePct"
@@ -444,6 +484,15 @@ export default function DashboardPage() {
                             connectNulls
                             name="Productive Share %"
                           />
+                          <Line
+                            type="monotone"
+                            dataKey="adherencePct"
+                            stroke="#0d9488"
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                            connectNulls
+                            name="Adherence %"
+                          />
                         </LineChart>
                       </ResponsiveContainer>
                     )}
@@ -452,14 +501,16 @@ export default function DashboardPage() {
               ) : (
                 <>
                 <div className="dashboard-card">
-                  <h3>Productive Hrs Trend</h3>
-                  <ResponsiveContainer width="100%" height={260}>
+                  <h3>Productive Hrs &amp; Adherence Trend</h3>
+                  <ResponsiveContainer width="100%" height={280}>
                     <LineChart data={productiveTrend} margin={{ top: 5, right: 20, left: 0, bottom: 24 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                       <XAxis dataKey="day" label={{ value: 'Day', position: 'insideBottom', offset: -14 }} fontSize={12} />
                       <YAxis domain={[0, 100]} unit="%" fontSize={12} />
                       <Tooltip formatter={(value) => `${value}%`} />
-                      <Line type="monotone" dataKey="productive" stroke="#1e3a8a" strokeWidth={2} dot={{ r: 3 }} name="Productive Hrs %" />
+                      <Legend verticalAlign="top" wrapperStyle={{ fontSize: 12 }} />
+                      <Line type="monotone" dataKey="productive" stroke="#1e3a8a" strokeWidth={2} dot={{ r: 3 }} connectNulls name="Productive Hrs %" />
+                      <Line type="monotone" dataKey="adherence" stroke="#0d9488" strokeWidth={2} dot={{ r: 3 }} connectNulls name="Adherence %" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
