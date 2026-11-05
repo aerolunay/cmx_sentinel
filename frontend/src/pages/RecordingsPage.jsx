@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import RecordingPlaybackModal from '../modals/RecordingPlaybackModal.jsx';
+import RecordingExemptionsModal from '../modals/RecordingExemptionsModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Full name from the agents table when the agent still exists there,
@@ -67,14 +68,28 @@ export default function RecordingsPage() {
   const [error, setError] = useState('');
   const [playingRecording, setPlayingRecording] = useState(null);
   const [downloadingKey, setDownloadingKey] = useState(null);
+  const [showExemptions, setShowExemptions] = useState(false);
 
   // Only the agent list loads automatically (from the database, not S3).
   // Recordings are fetched from S3 only when Search is clicked.
-  useEffect(() => {
+  function loadAgents() {
     api.listRecordingAgents()
       .then(setAgents)
       .catch((err) => setError(err.message));
+  }
+
+  useEffect(() => {
+    loadAgents();
   }, []);
+
+  // An exemption added/removed: refresh the agent picker and drop shown
+  // results (a new search applies the change).
+  function handleExemptionsChanged() {
+    loadAgents();
+    setAgentChoice('');
+    setRecordings([]);
+    setSearched(null);
+  }
 
   const maxDays = agentChoice === ALL_AGENTS ? MAX_RANGE_DAYS_ALL_AGENTS : MAX_RANGE_DAYS;
   const rangeProblem = !dateFrom || !dateTo
@@ -124,7 +139,17 @@ export default function RecordingsPage() {
 
   return (
     <>
-      <h2 style={{ marginTop: 0 }}>Recordings</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <h2 style={{ marginTop: 0 }}>Recordings</h2>
+        {isSuperAdmin && (
+          <button type="button" className="btn-secondary" style={{ marginBottom: 12 }} onClick={() => setShowExemptions(true)}>
+            Recording Exemptions
+          </button>
+        )}
+      </div>
+      {showExemptions && (
+        <RecordingExemptionsModal onClose={() => setShowExemptions(false)} onChanged={handleExemptionsChanged} />
+      )}
 
       <form
         onSubmit={handleSearch}

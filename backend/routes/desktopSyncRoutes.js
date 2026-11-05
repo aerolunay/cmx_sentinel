@@ -344,7 +344,7 @@ router.post("/inactivity-alert", async (req, res) => {
 //                        where its aux session starts
 //   status "out"/"none": no shift - end one that's running at
 //                        punchedOutAtUtc (a Check-Out after it started)
-//   status "overstayed": no Check-Out 18h+ after the Check-In - the
+//   status "overstayed": no Check-Out 14h+ after the Check-In - the
 //                        open login is closed here at the scheduled end
 //
 // onsite: whether this request came from the office network
@@ -375,12 +375,42 @@ router.get("/biometric-status", async (req, res) => {
       clientIp: req.ip,
     };
     if (!onsite) {
-      // WFH/hybrid: the Sentinel login is the shift - 18 hours after it
+      // WFH/hybrid: the Sentinel login is the shift - 14 hours after it
       // started it's closed at the scheduled end and the PC is told to
       // log out (over its event stream).
       await biometrics.closeOverstayedRemoteLogin(agentId);
     }
-    if (shift.status === "in") {
+    // A shift ended by a second Check-In (double login, or the next
+    // shift's In with no logout) is answered as a Check-Out at the time it
+    // was closed, so a PC still running that shift ends it there and logs
+    // out; endedBy says why (2.3.9+ desktops show it). Desktops only apply
+    // a Check-Out after the Check-In.
+    const asDoubleLoginOut = (shiftStartedAt, closedAtUtc, endedBy = biometrics.DOUBLE_LOGIN_TRIGGER) => {
+      body.status = "out";
+      body.endedBy = endedBy;
+      body.shiftStartedAtUtc = shiftStartedAt;
+      body.punchedOutAtUtc = new Date(Math.max(closedAtUtc.getTime(), shiftStartedAt.getTime() + 1000));
+    };
+    if (shift.status === biometrics.DOUBLE_LOGIN_TRIGGER && onsite) {
+      const closed = await biometrics.closeDoubleLogin(agentId, shift, false);
+      asDoubleLoginOut(shift.shiftStartedAt, closed.closedAtUtc);
+    } else if (shift.status === "in" && onsite && shift.previousShift) {
+      // A new Check-In after a shift with no Check-Out: close what is
+      // still open from the old shift. If this PC was still running it,
+      // answer for the old shift once so it logs out; the next check finds
+      // the new shift and starts it in Idle.
+      const closed = await biometrics.closePreviousShift(agentId, shift, false);
+      if (closed.closedCount > 0) {
+        if (shift.previousShift.reason !== biometrics.OVERSTAY_TRIGGER) {
+          asDoubleLoginOut(shift.previousShift.shiftStartedAt, closed.closedAtUtc, shift.previousShift.reason);
+        } else {
+          body.status = "overstayed";
+          body.shiftStartedAtUtc = shift.previousShift.shiftStartedAt;
+          body.closedAtUtc = closed.closedAtUtc;
+        }
+      }
+    }
+    if (body.status === "in") {
       body.resumeFromUtc = await biometrics.resumeFrom(agentId, shift.shiftStartedAt);
     } else if (shift.status === "overstayed" && onsite) {
       const closed = await biometrics.closeOverstayedShift(agentId, shift.shiftStartedAt, { pushLogout: false });

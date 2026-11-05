@@ -16,25 +16,35 @@ function workSetupForIp(ip) {
   return isOfficeIp(ip) ? "onsite" : "remote";
 }
 
-// Whether sql/010 has been run - queries skip the column until it has,
-// so deploying the code first doesn't break anything. A "no" is checked
-// again every few minutes, so running the migration needs no restart.
+// Whether a column exists yet (its migration has been run) - queries
+// skip the column until it has, so deploying the code first doesn't
+// break anything. A "no" is checked again every few minutes, so running
+// the migration needs no restart.
 const RECHECK_MS = 5 * 60 * 1000;
-let known = null; // { has: boolean, at: number }
+const known = new Map(); // "table.column" -> { has: boolean, at: number }
 
-async function hasWorkSetupColumn() {
-  if (known && (known.has || Date.now() - known.at < RECHECK_MS)) return known.has;
+async function hasColumn(table, column) {
+  const key = `${table}.${column}`;
+  const k = known.get(key);
+  if (k && (k.has || Date.now() - k.at < RECHECK_MS)) return k.has;
+  let has = false;
   try {
     const [[row]] = await db.query(
       `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'aux_events' AND COLUMN_NAME = 'work_setup'`
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [table, column]
     );
-    known = { has: Number(row.n) > 0, at: Date.now() };
+    has = Number(row.n) > 0;
   } catch (err) {
-    console.error("Could not check for aux_events.work_setup:", err);
-    known = { has: false, at: Date.now() };
+    console.error(`Could not check for ${key}:`, err);
   }
-  return known.has;
+  known.set(key, { has, at: Date.now() });
+  return has;
 }
 
-module.exports = { workSetupForIp, hasWorkSetupColumn };
+// sql/010
+function hasWorkSetupColumn() {
+  return hasColumn("aux_events", "work_setup");
+}
+
+module.exports = { workSetupForIp, hasWorkSetupColumn, hasColumn };

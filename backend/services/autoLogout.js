@@ -4,7 +4,7 @@ const { DateTime } = require("luxon");
 const db = require("../config/db");
 const sessionOwnership = require("./sessionOwnership");
 
-// Superseded by the 18-hour rule in services/biometrics.js and off by
+// Superseded by the 14-hour rule in services/biometrics.js and off by
 // default (SCHEDULE_AUTO_LOGOUT=1 turns it back on) - its shift matching
 // (mergeWindows/findOwningWindow) is still used there.
 //
@@ -132,10 +132,10 @@ function startAutoLogoutJob() {
   const tick = async () => {
     if (running) return;
     running = true;
-    // "No logout" now means 18 hours after time in, for onsite (biometric
+    // "No logout" now means 14 hours after time in, for onsite (biometric
     // Check-In) and WFH (Sentinel login) alike - services/biometrics.js.
     // This file's own rule (closed 6 hours after the scheduled end) is
-    // off unless SCHEDULE_AUTO_LOGOUT=1 in backend/.env; the 18-hour
+    // off unless SCHEDULE_AUTO_LOGOUT=1 in backend/.env; the 14-hour
     // check runs unless OVERSTAY_JOB=0.
     try {
       if (process.env.SCHEDULE_AUTO_LOGOUT === "1") await runAutoLogout();

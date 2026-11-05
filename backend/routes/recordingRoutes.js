@@ -9,6 +9,8 @@ const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole } = require("../middleware/requireRole");
 const { getScopedGroupIds } = require("../services/groupScope");
+const { loadExemptIds, isExempt } = require("../services/recordingExemptions");
+const { logAction } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -179,17 +181,19 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 // table (no S3), so every agent is listed whether or not they have
 // recordings yet. /api/agents is admin-only, which is why Recordings
 // (open to every web role) has its own. Supervisors only get agents in
-// their assigned groups.
+// their assigned groups. Agents exempted from recordings aren't listed.
 router.get("/agents", async (req, res) => {
   try {
     const scopedGroupIds = await getScopedGroupIds(req);
     if (scopedGroupIds !== null && scopedGroupIds.length === 0) {
       return res.json([]);
     }
-    const [rows] = await db.query(
-      "SELECT agent_id, display_name, group_id FROM agents ORDER BY display_name ASC"
-    );
-    const visible = scopedGroupIds === null ? rows : rows.filter((a) => scopedGroupIds.includes(a.group_id));
+    const [[rows], exemptIds] = await Promise.all([
+      db.query("SELECT agent_id, display_name, group_id FROM agents ORDER BY display_name ASC"),
+      loadExemptIds(),
+    ]);
+    const visible = rows.filter((a) => !exemptIds.has(String(a.agent_id))
+      && (scopedGroupIds === null || scopedGroupIds.includes(a.group_id)));
     res.json(visible.map((a) => ({ agentId: String(a.agent_id), displayName: a.display_name })));
   } catch (err) {
     console.error("Error listing recording agents:", err);
@@ -206,16 +210,21 @@ router.get("/", async (req, res) => {
   const agentId = req.query.agentId ? String(req.query.agentId) : null;
   const inRange = (r) =>
     (!dateFrom || r.recordedDateEastern >= dateFrom) && (!dateTo || r.recordedDateEastern <= dateTo);
-  const matchesAgent = (r) => !agentId || String(r.agentId) === agentId;
-
   try {
     const scopedGroupIds = await getScopedGroupIds(req);
     if (scopedGroupIds !== null && scopedGroupIds.length === 0) {
       return res.json([]);
     }
 
-    const [agentRows] = await db.query("SELECT agent_id, display_name, group_id FROM agents");
-    const agentsById = new Map(agentRows.map((a) => [String(a.agent_id), a]));
+    // Exempted agents' recordings are left out for everyone (they still
+    // exist in S3 / the archive) - sql/013.
+    const exemptIds = await loadExemptIds();
+    if (agentId && exemptIds.has(agentId)) return res.json([]);
+    const matchesAgent = (r) => (!agentId || String(r.agentId) === agentId) && !exemptIds.has(String(r.agentId));
+
+    const [allAgentRows] = await db.query("SELECT agent_id, display_name, group_id FROM agents");
+    const agentsById = new Map(allAgentRows.map((a) => [String(a.agent_id), a]));
+    const agentRows = allAgentRows.filter((a) => !exemptIds.has(String(a.agent_id)));
 
     // With a full date range (the page always sends one unless the
     // dates are cleared), look up just those days per agent. Otherwise
@@ -321,7 +330,7 @@ router.get("/url", async (req, res) => {
     return res.status(400).json({ error: "Invalid recording key." });
   }
 
-  if (!(await isKeyInScope(req, parsed))) {
+  if (!(await isKeyInScope(req, parsed)) || (await isExempt(parsed.agentId))) {
     return res.status(403).json({ error: "You do not have access to this recording." });
   }
 
@@ -357,7 +366,7 @@ router.get("/download", requireRole("super_admin"), async (req, res) => {
     return res.status(400).json({ error: "Invalid recording key." });
   }
 
-  if (!(await isKeyInScope(req, parsed))) {
+  if (!(await isKeyInScope(req, parsed)) || (await isExempt(parsed.agentId))) {
     return res.status(403).json({ error: "You do not have access to this recording." });
   }
 
@@ -376,6 +385,86 @@ router.get("/download", requireRole("super_admin"), async (req, res) => {
     res.json({ url });
   } catch (err) {
     console.error("Error generating download URL:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
+// ---------------------------------------------------------------------
+// Recording exemptions (Super Admin): employee IDs whose recordings the
+// web app doesn't show - see sql/013 and services/recordingExemptions.js.
+// ---------------------------------------------------------------------
+
+const EMPLOYEE_ID_PATTERN = /^[A-Za-z0-9-]{1,32}$/;
+
+function exemptionsTableMissing(err, res) {
+  if (err && err.code === "ER_NO_SUCH_TABLE") {
+    res.status(503).json({ error: "Recording exemptions aren't set up yet - run sql/013_recording_exemptions.sql." });
+    return true;
+  }
+  return false;
+}
+
+router.get("/exemptions", requireRole("super_admin"), async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT e.employee_id, e.note, e.added_by_name, e.created_at, a.display_name
+       FROM recording_exemptions e
+       LEFT JOIN agents a ON a.agent_id = e.employee_id
+       ORDER BY COALESCE(a.display_name, e.employee_id)`
+    );
+    res.json(rows.map((r) => ({
+      employeeId: String(r.employee_id),
+      displayName: r.display_name || null,
+      note: r.note || "",
+      addedBy: r.added_by_name || null,
+      addedAt: r.created_at,
+    })));
+  } catch (err) {
+    if (err && err.code === "ER_NO_SUCH_TABLE") return res.json([]);
+    console.error("Error listing recording exemptions:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
+router.post("/exemptions", requireRole("super_admin"), async (req, res) => {
+  const employeeId = String((req.body && req.body.employeeId) || "").trim();
+  const note = String((req.body && req.body.note) || "").trim();
+  if (!EMPLOYEE_ID_PATTERN.test(employeeId)) {
+    return res.status(400).json({ error: "Enter a valid Employee ID." });
+  }
+  if (note.length > 255) {
+    return res.status(400).json({ error: "The note can be at most 255 characters." });
+  }
+
+  try {
+    const [result] = await db.query(
+      `INSERT IGNORE INTO recording_exemptions (employee_id, note, added_by_user_id, added_by_name)
+       VALUES (?, ?, ?, ?)`,
+      [employeeId, note || null, req.session.userId, req.session.displayName]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(409).json({ error: `Employee ID ${employeeId} is already exempted.` });
+    }
+    await logAction(req, "created", "recording_exemption", employeeId,
+      `Recordings of employee ${employeeId} hidden${note ? ` (${note})` : ""}.`);
+    res.status(201).json({ employeeId });
+  } catch (err) {
+    if (exemptionsTableMissing(err, res)) return;
+    console.error("Error adding recording exemption:", err);
+    res.status(500).json({ error: "A server error occurred." });
+  }
+});
+
+router.delete("/exemptions/:employeeId", requireRole("super_admin"), async (req, res) => {
+  try {
+    const [result] = await db.query("DELETE FROM recording_exemptions WHERE employee_id = ?", [req.params.employeeId]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: "That Employee ID isn't exempted." });
+    await logAction(req, "deleted", "recording_exemption", req.params.employeeId,
+      `Recordings of employee ${req.params.employeeId} shown again.`);
+    res.json({ employeeId: req.params.employeeId });
+  } catch (err) {
+    if (exemptionsTableMissing(err, res)) return;
+    console.error("Error removing recording exemption:", err);
     res.status(500).json({ error: "A server error occurred." });
   }
 });

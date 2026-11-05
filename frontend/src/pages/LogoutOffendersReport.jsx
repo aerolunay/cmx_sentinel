@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { addDays, getTodayEastern } from '../utils/dateRanges.js';
 
-// Logins the server closed because the agent never logged out - still
-// open 6 hours after the scheduled shift end (see
-// backend/services/autoLogout.js). Each row's session was ended at the
-// scheduled end, so the hours after it don't count as worked.
+// Logins the server closed because the agent never logged out (see
+// backend/services/biometrics.js): no logout 14 hours after the time in,
+// or a second biometric Check-In instead of a Check-Out (double login).
+// Each row's session was ended at the scheduled end (a double login: or
+// at the second Check-In, if earlier), so the time after it doesn't
+// count as worked. Rows without a reason are from the older 6-hour rule.
 
 const selectStyle = { padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 };
 
@@ -28,8 +30,18 @@ function statusLabel(r) {
   return r.appRunning ? 'Left Sentinel running' : 'Did not log out';
 }
 
+const REASON_LABELS = {
+  overstayed: 'Overstayed (14h)',
+  double_login: 'Double Log In',
+  no_logout: 'No Logout - Next Shift Log In',
+};
+
+function reasonLabel(r) {
+  return REASON_LABELS[r.reason] || 'No logout';
+}
+
 function toCsv(rows) {
-  const headers = ['Shift Date', 'Agent', 'Agent ID', 'Group', 'PC', 'Scheduled End', 'Last Aux', 'Aux Started', 'Detected At', 'Status'];
+  const headers = ['Shift Date', 'Agent', 'Agent ID', 'Group', 'PC', 'Reason', 'Scheduled End', 'Logged Out At', 'Last Aux', 'Aux Started', 'Detected At', 'Status'];
   const lines = [headers.join(',')];
   for (const r of rows) {
     lines.push([
@@ -38,7 +50,9 @@ function toCsv(rows) {
       r.agentId,
       `"${r.groupName || ''}"`,
       `"${r.machineName || ''}"`,
+      reasonLabel(r),
       r.scheduledEnd,
+      r.closedAt,
       r.auxCode,
       r.segmentStarted,
       r.detectedAt,
@@ -109,8 +123,10 @@ export default function LogoutOffendersReport() {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <p style={{ margin: 0, fontSize: 13, color: '#555', maxWidth: 520 }}>
-          Agents still logged in 6 hours after their scheduled shift end. The session was ended at the
-          scheduled end, so the time after it doesn't count as worked.
+          Agents logged out by the system: no logout 14 hours after their time in, a double log in (a second
+          biometric Check-In instead of a Check-Out), or no logout before checking in for the next shift.
+          The session was ended at the scheduled end - or at that second Check-In, if earlier - so the time
+          after it doesn't count as worked.
         </p>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <label style={{ fontSize: 13, color: '#555' }}>From</label>
@@ -162,7 +178,9 @@ export default function LogoutOffendersReport() {
                   <th>Agent</th>
                   <th>Group</th>
                   <th>PC</th>
+                  <th>Reason</th>
                   <th>Scheduled End</th>
+                  <th title="When the session was ended">Logged Out At</th>
                   <th title="The aux code the agent was left in">Last Aux</th>
                   <th>Aux Started</th>
                   <th title="When the hourly check found the session still open">Detected At</th>
@@ -176,7 +194,9 @@ export default function LogoutOffendersReport() {
                     <td>{r.displayName}</td>
                     <td>{r.groupName || <em style={{ color: '#999' }}>none</em>}</td>
                     <td>{r.machineName || <em style={{ color: '#999' }}>-</em>}</td>
+                    <td style={{ fontWeight: 600, color: r.reason === 'double_login' ? '#7c3aed' : undefined }}>{reasonLabel(r)}</td>
                     <td>{formatDateTime(r.scheduledEnd)}</td>
+                    <td>{formatDateTime(r.closedAt)}</td>
                     <td>{r.auxCode}</td>
                     <td>{formatDateTime(r.segmentStarted)}</td>
                     <td>{formatDateTime(r.detectedAt)}</td>
