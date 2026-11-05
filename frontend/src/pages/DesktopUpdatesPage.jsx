@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import DesktopClientsCard from '../components/DesktopClientsCard.jsx';
 
 // Super Admin: publish a new CMX Sentinel Desktop version to agent PCs.
 // Upload the two files build-release.ps1 writes (installer\Output\):
@@ -176,6 +177,8 @@ export default function DesktopUpdatesPage() {
           </div>
         )}
       </div>
+
+      <DesktopClientsCard latestVersion={published?.version || null} />
 
       {status?.installers?.length > 0 && (
         <div className="dashboard-card">

@@ -12,6 +12,7 @@ const { isOfficeIp } = require("../services/officeNetwork");
 const { recordLocation } = require("../services/agentLocation");
 const { workSetupForIp, hasWorkSetupColumn } = require("../services/workSetup");
 const { sendInactivityAlertEmail } = require("../services/emailService");
+const { recordClient } = require("../services/desktopClients");
 
 const router = express.Router();
 
@@ -19,6 +20,12 @@ const router = express.Router();
 // browser) - same API-key auth as violationRoutes.js, applied to the
 // whole router since every endpoint here needs it.
 router.use(requireInternalApiKey);
+// Desktop 2.3.10+: remember each PC's installed version (Desktop Updates page).
+router.use(recordClient);
+
+// Heartbeat from the desktop service every 30 minutes, logged in or not -
+// recordClient above does the recording.
+router.post("/heartbeat", (req, res) => res.json({ ok: true }));
 
 // ---------------------------------------------------------------------
 // Auth - replaces AuthService.cs's direct MySQL queries. The actual

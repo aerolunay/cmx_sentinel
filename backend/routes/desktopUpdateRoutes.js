@@ -13,6 +13,7 @@ const { s3, BUCKET_NAME } = require("../config/s3");
 const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole } = require("../middleware/requireRole");
 const { logAction } = require("../services/auditLog");
+const db = require("../config/db");
 
 // Desktop app auto-update, published from the web app (Super Admin):
 // the same two files build-release.ps1 writes, uploaded to the
@@ -224,6 +225,68 @@ router.post("/", upload.fields([{ name: "installer", maxCount: 1 }, { name: "man
     const message = s3Error(err);
     console.error("Error publishing desktop update:", err);
     return fail(message ? 403 : 500, message || "A server error occurred - nothing may have been published. Check the status and try again.");
+  }
+});
+
+// Agent PCs and the version each runs. Desktop 2.3.10+ reports itself
+// (desktop_clients, sql/014); PCs seen in aux_events in the last
+// UNREPORTED_DAYS that never reported are on 2.3.9 or older.
+const UNREPORTED_DAYS = 30;
+
+router.get("/clients", async (req, res) => {
+  try {
+    let reported = [];
+    try {
+      [reported] = await db.query(
+        `SELECT c.machine_name, c.app_version, c.last_agent_id, a.display_name, c.work_setup, c.last_ip,
+                c.first_seen_at, c.last_seen_at
+         FROM desktop_clients c
+         LEFT JOIN agents a ON a.agent_id = c.last_agent_id`
+      );
+    } catch (err) {
+      if (!(err && err.code === "ER_NO_SUCH_TABLE")) throw err;
+    }
+    const reportedNames = new Set(reported.map((r) => r.machine_name.toLowerCase()));
+
+    const [recent] = await db.query(
+      `SELECT ae.machine_name, ae.agent_id, a.display_name, ae.started_at_utc AS last_seen_at
+       FROM aux_events ae
+       JOIN (SELECT machine_name, MAX(started_at_utc) AS last_start
+             FROM aux_events
+             WHERE machine_name IS NOT NULL AND started_at_utc >= UTC_TIMESTAMP() - INTERVAL ${UNREPORTED_DAYS} DAY
+             GROUP BY machine_name) latest
+         ON latest.machine_name = ae.machine_name AND latest.last_start = ae.started_at_utc
+       LEFT JOIN agents a ON a.agent_id = ae.agent_id`
+    );
+    const unreported = new Map();
+    for (const r of recent) {
+      if (!r.machine_name || reportedNames.has(r.machine_name.toLowerCase())) continue;
+      unreported.set(r.machine_name.toLowerCase(), r);
+    }
+
+    res.json([
+      ...reported.map((r) => ({
+        machineName: r.machine_name,
+        version: r.app_version,
+        reported: true,
+        agentId: r.last_agent_id || null,
+        agentName: r.display_name || null,
+        workSetup: r.work_setup || null,
+        lastSeenAt: r.last_seen_at,
+      })),
+      ...[...unreported.values()].map((r) => ({
+        machineName: r.machine_name,
+        version: null, // 2.3.9 or older - doesn't report
+        reported: false,
+        agentId: r.agent_id || null,
+        agentName: r.display_name || null,
+        workSetup: null,
+        lastSeenAt: r.last_seen_at,
+      })),
+    ]);
+  } catch (err) {
+    console.error("Error listing desktop clients:", err);
+    res.status(500).json({ error: "A server error occurred." });
   }
 });
 
