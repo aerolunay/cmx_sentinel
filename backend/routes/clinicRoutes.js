@@ -10,11 +10,11 @@ const { logAction } = require("../services/auditLog");
 const router = express.Router();
 
 // Clinic Visits: the clinic records each employee visit - Med / Clinic
-// users ('clinic') add and edit them; everyone who can open Reports reads
-// them there (Supervisors only for their own groups' agents). Dates and
-// times are the clinic's wall clock (Philippine time) as entered - see
-// sql/011_clinic_visits.sql.
-const CLINIC_ROLES = ["clinic"];
+// users ('clinic') and Super Admins add and edit them; everyone who can
+// open Reports reads them there (Supervisors only for their own groups'
+// agents). Dates and times are the clinic's wall clock (Philippine time)
+// as entered - see sql/011_clinic_visits.sql.
+const CLINIC_ROLES = ["clinic", "super_admin"];
 const REPORT_ROLES = ["super_admin", "admin", "tqa", "supervisor", "manager"];
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

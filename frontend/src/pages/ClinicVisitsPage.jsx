@@ -7,9 +7,9 @@ import ClinicVisitFormModal from '../modals/ClinicVisitFormModal.jsx';
 
 const inputStyle = { padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 14 };
 
-// The only page Med / Clinic users have: the clinic's visit log, where
-// they add visits and edit them (e.g. to fill in the time released).
-// Everyone else reads the same log on the Reports page.
+// The clinic's visit log, where Med / Clinic users (their only page) and
+// Super Admins add visits and edit them (e.g. to fill in the time
+// released). Everyone else reads the same log on the Reports page.
 export default function ClinicVisitsPage() {
   const today = getTodayManila();
   const [dateFrom, setDateFrom] = useState(addDays(today, -6));

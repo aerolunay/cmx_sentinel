@@ -55,7 +55,7 @@ function AppRoutes() {
         <Route path="audit-log" element={<RequireRole role="super_admin"><AuditLogPage /></RequireRole>} />
         <Route path="violations" element={<RequireRole roles={["admin", "super_admin"]}><ViolationsPage /></RequireRole>} />
         <Route path="scheduler" element={<RequireRole roles={["admin", "super_admin"]}><SchedulerPage /></RequireRole>} />
-        <Route path="clinic-visits" element={<RequireRole role="clinic"><ClinicVisitsPage /></RequireRole>} />
+        <Route path="clinic-visits" element={<RequireRole roles={["clinic", "super_admin"]}><ClinicVisitsPage /></RequireRole>} />
       </Route>
     </Routes>
   );

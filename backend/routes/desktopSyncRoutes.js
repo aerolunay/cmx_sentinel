@@ -374,6 +374,12 @@ router.get("/biometric-status", async (req, res) => {
       onsite,
       clientIp: req.ip,
     };
+    if (!onsite) {
+      // WFH/hybrid: the Sentinel login is the shift - 18 hours after it
+      // started it's closed at the scheduled end and the PC is told to
+      // log out (over its event stream).
+      await biometrics.closeOverstayedRemoteLogin(agentId);
+    }
     if (shift.status === "in") {
       body.resumeFromUtc = await biometrics.resumeFrom(agentId, shift.shiftStartedAt);
     } else if (shift.status === "overstayed" && onsite) {

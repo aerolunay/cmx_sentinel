@@ -4,6 +4,7 @@ const { DateTime } = require("luxon");
 const db = require("../config/db");
 const sessionOwnership = require("./sessionOwnership");
 const { mergeWindows, findOwningWindow, shiftEst } = require("./autoLogout");
+const { hasWorkSetupColumn } = require("./workSetup");
 
 // Shift start/end come from the office biometric devices, not from
 // logging in to the desktop app. The timekeeping app's zk-sync pushes
@@ -18,6 +19,11 @@ const { mergeWindows, findOwningWindow, shiftEst } = require("./autoLogout");
 // double scan is just a second In) until the next Check-Out. One left
 // open longer than OVERSTAY_HOURS (the agent never punched out) is
 // closed by the server at the scheduled shift end.
+//
+// The same 18 hours apply to WFH/hybrid agents, whose shift is their
+// Sentinel login (onsite/remote: services/officeNetwork.js): a login
+// still open OVERSTAY_HOURS after it started is closed at the scheduled
+// end too. This replaced autoLogout.js's "6 hours after the shift end".
 const OVERSTAY_HOURS = 18;
 // Far enough back to see an overstayed shift's Check-In; an In older
 // than this with nothing after it is just a missed punch-out from days
@@ -25,6 +31,7 @@ const OVERSTAY_HOURS = 18;
 const LOOKBACK_HOURS = 36;
 const OVERSTAY_TRIGGER = "overstayed";
 const OVERSTAY_NOTE = "Automatic Logout - Overstayed - No Biometrics Logout";
+const OVERSTAY_NOTE_SENTINEL = "Automatic Logout - Overstayed - No Sentinel Logout";
 const EASTERN = "America/New_York";
 const SQL_FORMAT = "yyyy-MM-dd HH:mm:ss";
 const EST_FORMAT = "%Y-%m-%d %H:%i:%s";
@@ -120,10 +127,13 @@ async function scheduledEndFor(agentId, shiftStartedAt) {
 
 // Ends every login the agent still has open for an overstayed shift AT
 // the scheduled shift end, with logout_trigger 'overstayed' and the
-// note, and records it in auto_logouts. pushLogout: tell the PC over
-// its event stream (the hourly job) - the desktop's own status check
-// logs itself out without it.
-async function closeOverstayedShift(agentId, shiftStartedAt, { pushLogout }) {
+// note, and records it in auto_logouts (Utilization Violations).
+// shiftStartedAt: the biometric Check-In, or for WFH the Sentinel login.
+// pushLogout: tell the PC over its event stream - an onsite desktop's
+// own status check logs itself out without it. note: OVERSTAY_NOTE
+// (onsite) or OVERSTAY_NOTE_SENTINEL (WFH). The biometric records
+// themselves are never changed.
+async function closeOverstayedShift(agentId, shiftStartedAt, { pushLogout, note = OVERSTAY_NOTE }) {
   const { shiftDate, scheduledEndEst } = await scheduledEndFor(agentId, shiftStartedAt);
   const closeUtc = DateTime.fromSQL(scheduledEndEst, { zone: EASTERN }).toJSDate();
   const nowEst = DateTime.now().setZone(EASTERN).toFormat(SQL_FORMAT);
@@ -148,7 +158,7 @@ async function closeOverstayedShift(agentId, shiftStartedAt, { pushLogout }) {
            logout_trigger = ?,
            logout_note = ?
        WHERE event_id = ? AND ended_at_utc IS NULL`,
-      [closeUtc, scheduledEndEst, closeUtc, OVERSTAY_TRIGGER, OVERSTAY_NOTE, row.event_id]
+      [closeUtc, scheduledEndEst, closeUtc, OVERSTAY_TRIGGER, note, row.event_id]
     );
     if (result.affectedRows === 0) continue; // closed normally in the meantime
 
@@ -165,26 +175,72 @@ async function closeOverstayedShift(agentId, shiftStartedAt, { pushLogout }) {
         scheduledEndEst, row.start_est, closedAtEst, nowEst, appRunning ? 1 : 0]
     );
     closedCount++;
-    console.warn(`Overstay: agent ${agentId} punched in ${shiftStartedAt.toISOString()} with no biometric ` +
-      `Check-Out ${OVERSTAY_HOURS}h+ later - ${row.aux_code} on ${row.machine_name} closed at the scheduled end ${scheduledEndEst}.`);
+    console.warn(`Overstay: agent ${agentId}, shift started ${shiftStartedAt.toISOString()}, still logged in ` +
+      `${OVERSTAY_HOURS}h+ later (${note}) - ${row.aux_code} on ${row.machine_name} closed at the scheduled end ${scheduledEndEst}.`);
   }
   return { closedCount, scheduledEndEst, closedAtUtc: closeUtc };
 }
 
-// Hourly, alongside autoLogout.js: overstayed shifts whose PC isn't
-// asking (switched off, or still on a desktop build without biometrics).
+// The agent's current (open) Sentinel login: when it started, and
+// whether it was recorded from outside the office (aux_events.work_setup,
+// sql/010). null if they have no open login.
+async function openLogin(agentId) {
+  const [[latest]] = await db.query(
+    `SELECT login_session_id FROM aux_events
+     WHERE agent_id = ? AND ended_at_utc IS NULL
+     ORDER BY started_at_utc DESC LIMIT 1`,
+    [agentId]
+  );
+  if (!latest) return null;
+  const withSetup = await hasWorkSetupColumn();
+  const [[session]] = await db.query(
+    `SELECT MIN(started_at_utc) AS started_at, ${withSetup ? "MAX(work_setup = 'remote')" : "0"} AS remote
+     FROM aux_events WHERE agent_id = ? AND login_session_id = ?`,
+    [agentId, latest.login_session_id]
+  );
+  if (!session || !session.started_at) return null;
+  return { startedAt: new Date(session.started_at), remote: Boolean(Number(session.remote)) };
+}
+
+function isOverstayed(shiftStartedAt, now = new Date()) {
+  return now - shiftStartedAt > OVERSTAY_HOURS * 3600 * 1000;
+}
+
+// WFH/hybrid: a Sentinel login still open OVERSTAY_HOURS after it started
+// is closed at the scheduled end and the PC told to log out. Called by
+// the desktop's own status check (remote PCs) and the hourly job.
+async function closeOverstayedRemoteLogin(agentId) {
+  const login = await openLogin(agentId);
+  if (!login || !isOverstayed(login.startedAt)) return 0;
+  return (await closeOverstayedShift(agentId, login.startedAt, {
+    pushLogout: true, note: OVERSTAY_NOTE_SENTINEL,
+  })).closedCount;
+}
+
+// Hourly (autoLogout.js's job): overstayed shifts whose PC isn't asking -
+// switched off, or on a desktop build without these rules. The shift
+// starts at the biometric Check-In while one is open, unless the login
+// was recorded as remote - then, and when there's no open Check-In, it
+// starts at the Sentinel login.
 async function runOverstayCheck() {
   const [agents] = await db.query("SELECT DISTINCT agent_id FROM aux_events WHERE ended_at_utc IS NULL");
   let closed = 0;
   for (const { agent_id: agentId } of agents) {
-    const shift = await getBiometricShift(agentId);
-    if (shift.status !== "overstayed") continue;
-    closed += (await closeOverstayedShift(agentId, shift.shiftStartedAt, { pushLogout: true })).closedCount;
+    const login = await openLogin(agentId);
+    if (!login) continue;
+    const shift = login.remote ? null : await getBiometricShift(agentId);
+    if (shift && (shift.status === "in" || shift.status === "overstayed")) {
+      if (shift.status === "overstayed") {
+        closed += (await closeOverstayedShift(agentId, shift.shiftStartedAt, { pushLogout: true })).closedCount;
+      }
+    } else {
+      closed += await closeOverstayedRemoteLogin(agentId);
+    }
   }
   return closed;
 }
 
 module.exports = {
-  getBiometricShift, shiftFromPunches, resumeFrom, closeOverstayedShift, runOverstayCheck,
-  OVERSTAY_HOURS, OVERSTAY_TRIGGER, OVERSTAY_NOTE,
+  getBiometricShift, shiftFromPunches, resumeFrom, closeOverstayedShift, closeOverstayedRemoteLogin,
+  runOverstayCheck, OVERSTAY_HOURS, OVERSTAY_TRIGGER, OVERSTAY_NOTE, OVERSTAY_NOTE_SENTINEL,
 };

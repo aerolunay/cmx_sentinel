@@ -82,10 +82,17 @@ export default function Layout() {
               <NavLink to="/reports" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Reports
               </NavLink>
+              {/* Super Admin can add/edit clinic visits too; everyone
+                  else with Reports reads them under Reports. */}
               {isSuperAdmin && (
-                <NavLink to="/audit-log" className={({ isActive }) => (isActive ? 'active' : '')}>
-                  Audit Log
-                </NavLink>
+                <>
+                  <NavLink to="/clinic-visits" className={({ isActive }) => (isActive ? 'active' : '')}>
+                    Clinic Visits
+                  </NavLink>
+                  <NavLink to="/audit-log" className={({ isActive }) => (isActive ? 'active' : '')}>
+                    Audit Log
+                  </NavLink>
+                </>
               )}
 
               <a href="#" onClick={(e) => { e.preventDefault(); setShowAbout(true); }} style={{ marginTop: 12 }}>
