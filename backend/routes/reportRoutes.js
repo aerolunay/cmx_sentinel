@@ -6,7 +6,7 @@ const { requireAuth } = require("../middleware/requireAuth");
 const { getScopedGroupIds } = require("../services/groupScope");
 const { toEasternSqlString } = require("../services/easternTime");
 const { getLocation } = require("../services/agentLocation");
-const { hasWorkSetupColumn } = require("../services/workSetup");
+const { hasWorkSetupColumn, hasColumn } = require("../services/workSetup");
 const { loadClinicWindows, clinicPieces, splitForClinic, CLINIC_AUX } = require("../services/clinicCredit");
 const { DateTime } = require("luxon");
 
@@ -624,9 +624,11 @@ router.get("/efficiency", async (req, res) => {
   }
 });
 
-// Logout offenders: logins the server closed because they were still
-// open 6 hours after the shift ended (services/autoLogout.js), one row
-// each, filtered by the shift's date. appRunning = Sentinel was still
+// Logout offenders: logins the server closed because the agent never
+// logged out - 14 hours after the time in ('overstayed'), a second
+// biometric Check-In instead of a Check-Out ('double_login'), or (older
+// rows, reason NULL) 6 hours after the shift end - services/biometrics.js
+// and autoLogout.js. One row each, filtered by the shift's date. appRunning = Sentinel was still
 // running on the PC (left running) rather than shut down without
 // logging out.
 router.get("/auto-logouts", async (req, res) => {
@@ -641,6 +643,7 @@ router.get("/auto-logouts", async (req, res) => {
       return res.json([]);
     }
     const filter = buildConditions("al.shift_date", { dateFrom, dateTo, agentId, groupId, scopedGroupIds });
+    const withReason = await hasColumn("auto_logouts", "reason"); // sql/012
     const [rows] = await db.query(
       `SELECT al.auto_logout_id, a.agent_id, a.display_name, a.group_id, g.group_name, al.machine_name, al.aux_code,
               DATE_FORMAT(al.shift_date, '%Y-%m-%d') AS shift_date,
@@ -648,7 +651,7 @@ router.get("/auto-logouts", async (req, res) => {
               DATE_FORMAT(al.segment_started_est, '${EST_FORMAT}') AS segment_started,
               DATE_FORMAT(al.closed_at_est, '${EST_FORMAT}') AS closed_at,
               DATE_FORMAT(al.detected_at_est, '${EST_FORMAT}') AS detected_at,
-              al.app_running
+              al.app_running, ${withReason ? "al.reason" : "NULL"} AS reason
        FROM auto_logouts al
        JOIN agents a ON a.agent_id = al.agent_id
        LEFT JOIN agent_groups g ON g.group_id = a.group_id
@@ -670,6 +673,7 @@ router.get("/auto-logouts", async (req, res) => {
       closedAt: r.closed_at,
       detectedAt: r.detected_at,
       appRunning: Boolean(r.app_running),
+      reason: r.reason || null,
     })));
   } catch (err) {
     console.error("Error generating logout offenders report:", err);

@@ -73,6 +73,12 @@ export const api = {
   // super_admin only (enforced server-side too) - returns a presigned
   // URL that prompts an actual file save rather than playing inline.
   getRecordingDownloadUrl: (key) => request(`/api/recordings/download?key=${encodeURIComponent(key)}`),
+  // super_admin only: employee IDs whose recordings aren't shown.
+  listRecordingExemptions: () => request('/api/recordings/exemptions'),
+  addRecordingExemption: (exemption) =>
+    request('/api/recordings/exemptions', { method: 'POST', body: JSON.stringify(exemption) }),
+  removeRecordingExemption: (employeeId) =>
+    request(`/api/recordings/exemptions/${encodeURIComponent(employeeId)}`, { method: 'DELETE' }),
 
   listGroups: () => request('/api/groups'),
   createGroup: (groupName) => request('/api/groups', { method: 'POST', body: JSON.stringify({ groupName }) }),
