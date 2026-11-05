@@ -92,6 +92,9 @@ export default function Layout() {
                   <NavLink to="/audit-log" className={({ isActive }) => (isActive ? 'active' : '')}>
                     Audit Log
                   </NavLink>
+                  <NavLink to="/desktop-updates" className={({ isActive }) => (isActive ? 'active' : '')}>
+                    Desktop Updates
+                  </NavLink>
                 </>
               )}
 

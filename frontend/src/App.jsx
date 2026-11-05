@@ -13,6 +13,7 @@ import AuditLogPage from './pages/AuditLogPage.jsx';
 import ViolationsPage from './pages/ViolationsPage.jsx';
 import SchedulerPage from './pages/SchedulerPage.jsx';
 import ClinicVisitsPage from './pages/ClinicVisitsPage.jsx';
+import DesktopUpdatesPage from './pages/DesktopUpdatesPage.jsx';
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
@@ -56,6 +57,7 @@ function AppRoutes() {
         <Route path="violations" element={<RequireRole roles={["admin", "super_admin"]}><ViolationsPage /></RequireRole>} />
         <Route path="scheduler" element={<RequireRole roles={["admin", "super_admin"]}><SchedulerPage /></RequireRole>} />
         <Route path="clinic-visits" element={<RequireRole roles={["clinic", "super_admin"]}><ClinicVisitsPage /></RequireRole>} />
+        <Route path="desktop-updates" element={<RequireRole role="super_admin"><DesktopUpdatesPage /></RequireRole>} />
       </Route>
     </Routes>
   );

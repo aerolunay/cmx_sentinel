@@ -80,6 +80,30 @@ export const api = {
   removeRecordingExemption: (employeeId) =>
     request(`/api/recordings/exemptions/${encodeURIComponent(employeeId)}`, { method: 'DELETE' }),
 
+  // super_admin only: desktop app auto-update (S3 updates/).
+  getDesktopUpdates: () => request('/api/desktop-updates'),
+  // XMLHttpRequest rather than fetch for upload progress (the installer
+  // is ~110 MB). onProgress gets 0-100.
+  publishDesktopUpdate: (installer, manifest, onProgress) => new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('installer', installer);
+    form.append('manifest', manifest);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/desktop-updates');
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || `Upload failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('Upload failed - check your connection and try again.'));
+    xhr.send(form);
+  }),
+
   listGroups: () => request('/api/groups'),
   createGroup: (groupName) => request('/api/groups', { method: 'POST', body: JSON.stringify({ groupName }) }),
   updateGroup: (groupId, groupName) =>
