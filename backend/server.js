@@ -18,6 +18,7 @@ const scheduleRoutes = require("./routes/scheduleRoutes");
 const auditRoutes = require("./routes/auditRoutes");
 const violationRoutes = require("./routes/violationRoutes");
 const desktopSyncRoutes = require("./routes/desktopSyncRoutes");
+const desktopUpdateRoutes = require("./routes/desktopUpdateRoutes");
 const archiveRoutes = require("./routes/archiveRoutes");
 const clinicRoutes = require("./routes/clinicRoutes");
 const { startAutoLogoutJob } = require("./services/autoLogout");
@@ -107,6 +108,7 @@ app.use("/api/schedules", scheduleRoutes);
 app.use("/api/audit-log", auditRoutes);
 app.use("/api/violations", violationRoutes);
 app.use("/api/desktop-sync", desktopSyncRoutes);
+app.use("/api/desktop-updates", desktopUpdateRoutes);
 // Mounted at /archive, not /api/archive - shared-secret auth (not
 // session-based), called by scripts/archive_recordings.py running
 // somewhere outside this server entirely. See archiveRoutes.js's own
@@ -118,9 +120,12 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "A server error occurred." });
 });
 
-app.listen(PORT, "127.0.0.1", () => {
+const server = app.listen(PORT, "127.0.0.1", () => {
   console.log(`CMX Sentinel Admin backend listening on http://127.0.0.1:${PORT}`);
   // Hourly: logins still open 6h after the shift ended are closed at the
   // scheduled end - see services/autoLogout.js.
   startAutoLogoutJob();
 });
+// Node's default 5-minute limit per request is too short for uploading
+// a ~110 MB desktop installer over a slow connection (Desktop Updates).
+server.requestTimeout = 30 * 60 * 1000;
