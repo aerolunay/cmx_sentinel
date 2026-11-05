@@ -82,6 +82,7 @@ export const api = {
 
   // super_admin only: desktop app auto-update (S3 updates/).
   getDesktopUpdates: () => request('/api/desktop-updates'),
+  getDesktopClients: () => request('/api/desktop-updates/clients'),
   // XMLHttpRequest rather than fetch for upload progress (the installer
   // is ~110 MB). onProgress gets 0-100.
   publishDesktopUpdate: (installer, manifest, onProgress) => new Promise((resolve, reject) => {
