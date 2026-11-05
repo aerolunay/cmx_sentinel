@@ -142,12 +142,12 @@ function biometricTime(value, now) {
   return date;
 }
 
-// Production, Admin or Adhoc auto-set to Idle after 5 minutes with no activity and an
+// Production, Admin or Adhoc auto-set to Idle after 10 minutes with no activity and an
 // unanswered 1-minute prompt (the desktop's InactivityMonitor): the
 // working segment ends, and the Idle one starts, at the agent's last
-// activity - so those 6 minutes count as Idle. Only accepted within the
+// activity - so those 11 minutes count as Idle. Only accepted within the
 // last INACTIVITY_MAX_MINUTES, never in the future.
-const INACTIVITY_MAX_MINUTES = 15;
+const INACTIVITY_MAX_MINUTES = 20;
 const INACTIVITY_NOTE = "Auto set to Idle due to inactivity";
 const INACTIVITY_WATCHED_AUX = ["Production", "Admin", "Adhoc"];
 
