@@ -37,6 +37,35 @@ router.post("/heartbeat", (req, res) => res.json({ ok: true }));
 // desktop machine can't tamper with even if fully compromised).
 // ---------------------------------------------------------------------
 
+// The desktop's Admin aux is only for the Supervisors, Training and
+// Quality and RRT groups, and for agents who are also Sentinel web users
+// (their agent email, or Employee ID for admins, matches an active web
+// user). Group names are matched loosely so "Supervisor"/"Supervisors",
+// "Training & Quality"/"TQA" and "RRT ..." all count. Sent to the desktop
+// as adminAuxAllowed on login and session recovery; null (lookup failed)
+// leaves Admin available rather than block anyone's login.
+const ADMIN_AUX_GROUP_PATTERNS = [/supervisor/i, /\brrt\b/i, /training\s*(and|&)\s*quality/i, /\btqa\b/i];
+
+async function isAdminAuxAllowed(agentId) {
+  try {
+    const [[row]] = await db.query(
+      `SELECT g.group_name,
+              EXISTS (SELECT 1 FROM web_users u
+                      WHERE u.is_active = TRUE
+                        AND ((a.email IS NOT NULL AND a.email <> '' AND LOWER(u.email) = LOWER(a.email))
+                             OR u.login_identifier = a.agent_id)) AS is_web_user
+       FROM agents a LEFT JOIN agent_groups g ON g.group_id = a.group_id
+       WHERE a.agent_id = ?`,
+      [agentId]
+    );
+    if (!row) return false;
+    return Boolean(row.is_web_user) || ADMIN_AUX_GROUP_PATTERNS.some((p) => p.test(row.group_name || ""));
+  } catch (err) {
+    console.error("Error checking Admin aux access:", err);
+    return null;
+  }
+}
+
 router.post("/auth/verify", async (req, res) => {
   const { agentId, password } = req.body || {};
   if (!agentId || !password) {
@@ -70,6 +99,7 @@ router.post("/auth/verify", async (req, res) => {
       success: true,
       displayName: agent.display_name,
       mustResetPassword: Boolean(agent.must_reset_password),
+      adminAuxAllowed: await isAdminAuxAllowed(agentId),
     });
   } catch (err) {
     console.error("Error verifying agent credentials:", err);
@@ -731,6 +761,7 @@ router.get("/session-recovery", async (req, res) => {
       displayName: row.display_name,
       currentSegmentStartedAtUtc: new Date(row.started_at_utc).toISOString(),
       sessionStartedAtUtc: new Date(sessionStartedAtUtc).toISOString(),
+      adminAuxAllowed: await isAdminAuxAllowed(row.agent_id),
     });
   } catch (err) {
     console.error("Error during session recovery lookup:", err);
