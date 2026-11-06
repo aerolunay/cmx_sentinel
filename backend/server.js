@@ -19,6 +19,7 @@ const auditRoutes = require("./routes/auditRoutes");
 const violationRoutes = require("./routes/violationRoutes");
 const desktopSyncRoutes = require("./routes/desktopSyncRoutes");
 const desktopUpdateRoutes = require("./routes/desktopUpdateRoutes");
+const biometricPunchRoutes = require("./routes/biometricPunchRoutes");
 const archiveRoutes = require("./routes/archiveRoutes");
 const clinicRoutes = require("./routes/clinicRoutes");
 const { startAutoLogoutJob } = require("./services/autoLogout");
@@ -109,6 +110,8 @@ app.use("/api/audit-log", auditRoutes);
 app.use("/api/violations", violationRoutes);
 app.use("/api/desktop-sync", desktopSyncRoutes);
 app.use("/api/desktop-updates", desktopUpdateRoutes);
+// zk-sync (office PC): key auth, not a session - see the route's header.
+app.use("/api/biometric-punches", biometricPunchRoutes);
 // Mounted at /archive, not /api/archive - shared-secret auth (not
 // session-based), called by scripts/archive_recordings.py running
 // somewhere outside this server entirely. See archiveRoutes.js's own

@@ -5,6 +5,7 @@ const db = require("../config/db");
 const sessionOwnership = require("./sessionOwnership");
 const { mergeWindows, findOwningWindow, shiftEst } = require("./autoLogout");
 const { hasWorkSetupColumn, hasColumn } = require("./workSetup");
+// hasColumn("biometric_punches", ...) doubles as "has sql/017 been run".
 
 // Shift start/end come from the office biometric devices, not from
 // logging in to the desktop app. The timekeeping app's zk-sync pushes
@@ -63,21 +64,45 @@ const EST_FORMAT = "%Y-%m-%d %H:%i:%s";
 const CHECK_IN = 0;
 const CHECK_OUT = 1;
 
-async function loadPunches(agentId) {
+// Punches come from two places, read together so either one alone is
+// enough: CMX Pulse's raw device log (zk-sync -> Pulse) and Sentinel's
+// own biometric_punches (zk-sync -> Sentinel directly, sql/017). The same
+// punch in both counts once. A source that can't be read is skipped; only
+// both failing is an error (the desktop then changes nothing).
+function punchQuery(table) {
   // punched_at formatted in SQL and parsed as UTC here, so the result
   // doesn't depend on the Node process's own timezone.
-  const [rows] = await db.query(
-    `SELECT DATE_FORMAT(punched_at, '%Y-%m-%d %H:%i:%s.%f') AS punched_at, state
-     FROM ph_timekeeping.device_attendance_logs
-     WHERE device_user = ? AND state IN (${CHECK_IN}, ${CHECK_OUT}) AND punched_at IS NOT NULL
-       AND punched_at >= UTC_TIMESTAMP(3) - INTERVAL ${LOOKBACK_HOURS} HOUR
-     ORDER BY punched_at, id`,
-    [String(agentId)]
-  );
-  return rows.map((r) => ({
-    at: DateTime.fromSQL(r.punched_at, { zone: "utc" }).toJSDate(),
-    state: Number(r.state),
-  }));
+  return `SELECT DATE_FORMAT(punched_at, '%Y-%m-%d %H:%i:%s.%f') AS punched_at, state
+          FROM ${table}
+          WHERE device_user = ? AND state IN (${CHECK_IN}, ${CHECK_OUT}) AND punched_at IS NOT NULL
+            AND punched_at >= UTC_TIMESTAMP(3) - INTERVAL ${LOOKBACK_HOURS} HOUR
+          ORDER BY punched_at, id`;
+}
+
+async function loadPunches(agentId) {
+  const sources = [db.query(punchQuery("ph_timekeeping.device_attendance_logs"), [String(agentId)])];
+  if (await hasColumn("biometric_punches", "punched_at")) {
+    sources.push(db.query(punchQuery("biometric_punches"), [String(agentId)]));
+  }
+  const results = await Promise.allSettled(sources);
+  if (results.every((r) => r.status === "rejected")) throw results[0].reason;
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      console.error(`Reading punches from ${i === 0 ? "CMX Pulse" : "biometric_punches"} failed:`, r.reason);
+    }
+  });
+
+  const byKey = new Map();
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    for (const row of r.value[0]) byKey.set(`${row.punched_at}|${row.state}`, row);
+  }
+  return [...byKey.values()]
+    .sort((a, b) => (a.punched_at < b.punched_at ? -1 : a.punched_at > b.punched_at ? 1 : 0))
+    .map((r) => ({
+      at: DateTime.fromSQL(r.punched_at, { zone: "utc" }).toJSDate(),
+      state: Number(r.state),
+    }));
 }
 
 // punches: oldest first. Returns where the agent stands right now:
