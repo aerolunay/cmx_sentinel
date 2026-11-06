@@ -85,6 +85,7 @@ export default function AgentsPage() {
         case 'group_name': return a.group_name;
         case 'is_active': return a.is_active;
         case 'must_reset_password': return a.must_reset_password;
+        case 'admin_aux_allowed': return a.admin_aux_allowed;
         default: return null;
       }
     });
@@ -127,12 +128,13 @@ export default function AgentsPage() {
               <SortableTh label="Group" sortKey="group_name" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
               <SortableTh label="Status" sortKey="is_active" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
               <SortableTh label="Must Reset Password" sortKey="must_reset_password" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
+              <SortableTh label="Admin Aux" sortKey="admin_aux_allowed" sort={sort} onSort={(k) => toggleSort(sort, setSort, k)} />
               <th></th>
             </tr>
           </thead>
           <tbody>
             {visibleAgents.length === 0 ? (
-              <tr><td colSpan={7}>{agents.length === 0 ? 'No agents yet.' : 'No agents match your search.'}</td></tr>
+              <tr><td colSpan={8}>{agents.length === 0 ? 'No agents yet.' : 'No agents match your search.'}</td></tr>
             ) : (
               visibleAgents.map((a) => (
                 <tr key={a.agent_id}>
@@ -142,6 +144,7 @@ export default function AgentsPage() {
                   <td>{a.group_name || <em style={{ color: '#999' }}>none</em>}</td>
                   <td>{a.is_active ? 'Active' : 'Disabled'}</td>
                   <td>{a.must_reset_password ? 'Yes' : 'No'}</td>
+                  <td>{a.admin_aux_allowed ? 'Yes' : 'No'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {!readOnly && (
                       <>

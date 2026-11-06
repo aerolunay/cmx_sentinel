@@ -7,6 +7,14 @@ import { api } from '../api.js';
 // password field at all here - a temp password is always auto-
 // generated and emailed, either on creation or via the separate Reset
 // Password action on the Agents table.
+//
+// Admin Aux: whether the desktop app lets this agent pick Admin. When
+// adding, it follows the chosen group (checked for Supervisors, Training
+// and Quality / TQA and RRT - same names as backend/services/adminAux.js)
+// until clicked; left untouched, the server also checks it for agents
+// who are web users. When editing, it only changes when clicked.
+const ADMIN_AUX_GROUP_PATTERNS = [/supervisor/i, /\brrt\b/i, /training\s*(and|&)\s*quality/i, /\btqa\b/i];
+
 export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
   const isEditing = Boolean(existingAgent);
 
@@ -15,6 +23,8 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
   const [email, setEmail] = useState(existingAgent?.email || '');
   const [groupId, setGroupId] = useState(existingAgent?.group_id || '');
   const [groups, setGroups] = useState([]);
+  const [adminAuxChecked, setAdminAuxChecked] = useState(Boolean(existingAgent?.admin_aux_allowed));
+  const [adminAuxTouched, setAdminAuxTouched] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -25,6 +35,12 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
       // still works fine if this fails for some reason.
     });
   }, []);
+
+  useEffect(() => {
+    if (isEditing || adminAuxTouched) return;
+    const groupName = groups.find((g) => String(g.group_id) === String(groupId))?.group_name || '';
+    setAdminAuxChecked(ADMIN_AUX_GROUP_PATTERNS.some((p) => p.test(groupName)));
+  }, [isEditing, adminAuxTouched, groups, groupId]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -38,6 +54,7 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
           displayName: displayName.trim(),
           email: email.trim(),
           groupId: groupId || null,
+          adminAuxAllowed: adminAuxChecked,
         });
         onSaved(saved);
         onClose();
@@ -47,6 +64,8 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
           displayName: displayName.trim(),
           email: email.trim(),
           groupId: groupId || null,
+          // Untouched: let the server decide (group or web user).
+          ...(adminAuxTouched ? { adminAuxAllowed: adminAuxChecked } : {}),
         });
         // Show the "temp password sent" confirmation before closing,
         // rather than closing immediately - the admin should actually
@@ -113,6 +132,25 @@ export default function AgentFormModal({ existingAgent, onClose, onSaved }) {
               <option key={g.group_id} value={g.group_id}>{g.group_name}</option>
             ))}
           </select>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontWeight: 'normal' }}>
+            <input
+              type="checkbox"
+              checked={adminAuxChecked}
+              onChange={(e) => {
+                setAdminAuxTouched(true);
+                setAdminAuxChecked(e.target.checked);
+              }}
+              disabled={Boolean(message)}
+              style={{ width: 'auto', margin: 0 }}
+            />
+            Admin Aux (can select Admin in the desktop app)
+          </label>
+          {!isEditing && !adminAuxTouched && (
+            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+              Checked automatically for Supervisors, Training and Quality, RRT and web users.
+            </div>
+          )}
 
           <div className="modal-actions">
             {message ? (
