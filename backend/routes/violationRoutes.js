@@ -78,7 +78,7 @@ router.post("/", requireInternalApiKey, async (req, res) => {
 // Viewing is a normal browser session - Admin/Super Admin only for now,
 // matching where restriction MANAGEMENT lives (Groups & Restrictions is
 // super_admin-only, Admin still has operational visibility here).
-router.get("/", requireAuth, requireRole("admin", "super_admin"), async (req, res) => {
+router.get("/", requireAuth, requireRole("admin", "super_admin", "compliance"), async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT v.violation_id, v.agent_id, a.display_name, v.group_id, g.group_name,
@@ -95,7 +95,7 @@ router.get("/", requireAuth, requireRole("admin", "super_admin"), async (req, re
   }
 });
 
-router.get("/settings", requireAuth, requireRole("admin", "super_admin"), async (req, res) => {
+router.get("/settings", requireAuth, requireRole("admin", "super_admin", "compliance"), async (req, res) => {
   try {
     res.json({ alertEmails: await violationAlertsEnabled() });
   } catch (err) {

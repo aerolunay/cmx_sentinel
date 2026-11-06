@@ -19,4 +19,20 @@ function requireRole(...allowedRoles) {
   };
 }
 
-module.exports = { requireRole };
+// Read-only roles (Compliance) see a page's data but can't change it:
+// `roles` get every method, `readOnlyRoles` only GET/HEAD.
+//   router.use(requireAuth, requireRoleOrReadOnly(["admin", "super_admin"], READ_ONLY_ROLES))
+const READ_ONLY_ROLES = ["compliance"];
+
+function requireRoleOrReadOnly(roles, readOnlyRoles = READ_ONLY_ROLES) {
+  return (req, res, next) => {
+    const role = req.session && req.session.role;
+    const isRead = req.method === "GET" || req.method === "HEAD";
+    if (roles.includes(role) || (isRead && readOnlyRoles.includes(role))) {
+      return next();
+    }
+    return res.status(403).json({ error: "You do not have access to this." });
+  };
+}
+
+module.exports = { requireRole, requireRoleOrReadOnly, READ_ONLY_ROLES };

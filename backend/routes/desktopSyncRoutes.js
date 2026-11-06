@@ -284,8 +284,11 @@ router.post("/aux-events/close", async (req, res) => {
 // ---------------------------------------------------------------------
 // Inactivity alert - sent by the desktop service right after it auto-set
 // an agent's Production, Admin or Adhoc to Idle (see /aux-events/open's INACTIVITY_NOTE).
-// Emails every active Admin/Super Admin plus the Supervisors assigned
-// to the agent's group. Best-effort per recipient, like violation alerts.
+// Emails every Manager and Compliance user (all inactivity) plus the
+// Supervisors assigned to the agent's group. If the agent is a
+// Supervisor themselves (their agent email is an active Supervisor web
+// user's), it goes only to Managers and Compliance - never to their
+// fellow Supervisors. Best-effort per recipient, like violation alerts.
 // ---------------------------------------------------------------------
 
 router.post("/inactivity-alert", async (req, res) => {
@@ -298,7 +301,10 @@ router.post("/inactivity-alert", async (req, res) => {
 
   try {
     const [[agent]] = await db.query(
-      `SELECT a.display_name, a.group_id, g.group_name
+      `SELECT a.display_name, a.group_id, g.group_name,
+              EXISTS (SELECT 1 FROM web_users s
+                      WHERE s.role = 'supervisor' AND s.is_active = TRUE
+                        AND a.email IS NOT NULL AND a.email <> '' AND LOWER(s.email) = LOWER(a.email)) AS is_supervisor
        FROM agents a LEFT JOIN agent_groups g ON g.group_id = a.group_id
        WHERE a.agent_id = ?`,
       [agentId]
@@ -307,8 +313,9 @@ router.post("/inactivity-alert", async (req, res) => {
       `SELECT DISTINCT u.email FROM web_users u
        LEFT JOIN web_user_groups ug ON ug.user_id = u.user_id
        WHERE u.is_active = TRUE AND u.email IS NOT NULL AND u.email <> ''
-         AND (u.role IN ('admin', 'super_admin') OR (u.role = 'supervisor' AND ug.group_id = ?))`,
-      [agent?.group_id ?? null]
+         AND (u.role IN ('manager', 'compliance')
+              OR (u.role = 'supervisor' AND NOT ? AND ug.group_id = ?))`,
+      [Boolean(agent?.is_supervisor), agent?.group_id ?? null]
     );
 
     const idleSetAt = inactivityTime(idleSetAtUtc, now) || now;

@@ -9,7 +9,11 @@ import { formatRole } from '../utils/roles.js';
 export default function Layout() {
   const { user, logout } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
-  const canManageAgents = user?.role === 'admin' || user?.role === 'super_admin';
+  // Compliance sees every page below except Clinic Visits (read under
+  // Reports) and Desktop Updates - Users, Agents, Groups & Restrictions
+  // and Shift Scheduler read-only.
+  const isCompliance = user?.role === 'compliance';
+  const canManageAgents = user?.role === 'admin' || user?.role === 'super_admin' || isCompliance;
   // Med / Clinic users only have the Clinic Visits page - every other
   // path (the Dashboard home included) sends them there. The server
   // blocks the role from every other API too (server.js).
@@ -52,7 +56,7 @@ export default function Layout() {
                   longer reachable by regular Admin (enforced server-side
                   too via requireRole, this is just hiding links someone
                   couldn't use anyway). */}
-              {isSuperAdmin && (
+              {(isSuperAdmin || isCompliance) && (
                 <>
                   <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
                     Users
@@ -82,6 +86,11 @@ export default function Layout() {
               <NavLink to="/reports" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Reports
               </NavLink>
+              {isCompliance && (
+                <NavLink to="/audit-log" className={({ isActive }) => (isActive ? 'active' : '')}>
+                  Audit Log
+                </NavLink>
+              )}
               {/* Super Admin can add/edit clinic visits too; everyone
                   else with Reports reads them under Reports. */}
               {isSuperAdmin && (

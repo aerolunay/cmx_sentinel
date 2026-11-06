@@ -8,6 +8,7 @@ const ROLES = [
   { value: 'supervisor', label: 'Supervisor' },
   { value: 'manager', label: 'Manager' },
   { value: 'clinic', label: 'Med / Clinic' },
+  { value: 'compliance', label: 'Compliance' },
 ];
 
 // Mirrors backend/services/groupScope.js - Supervisors pick one or more
@@ -124,7 +125,7 @@ export default function UserFormModal({ existingUser, onClose, onSaved }) {
 
           {isGroupScoped && (
             <>
-              <label>Groups (this user only sees these groups' agents/recordings/reports)</label>
+              <label>Groups (this user only sees these groups' agents/recordings/reports, and gets their inactivity alerts)</label>
               <div style={{
                 border: '1px solid #ccc', borderRadius: 6, padding: 8, maxHeight: 140,
                 overflowY: 'auto', marginBottom: 14,

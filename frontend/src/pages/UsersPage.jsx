@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import UserFormModal from '../modals/UserFormModal.jsx';
-import { formatRole } from '../utils/roles.js';
+import { formatRole, isReadOnlyRole } from '../utils/roles.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import SortableTh, { toggleSort } from '../components/SortableTh.jsx';
 import { sortRows, matchesSearch } from '../utils/tableSort.js';
 
 export default function UsersPage() {
+  const { user: currentUser } = useAuth();
+  const readOnly = isReadOnlyRole(currentUser?.role);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -69,7 +72,7 @@ export default function UsersPage() {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Users</h2>
-        <button className="btn" onClick={() => setModalUser(null)}>+ Add User</button>
+        {!readOnly && <button className="btn" onClick={() => setModalUser(null)}>+ Add User</button>}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -108,7 +111,7 @@ export default function UsersPage() {
                   <td>{u.display_name}</td>
                   <td>{formatRole(u.role)}</td>
                   <td>
-                    {u.role === 'manager'
+                    {u.role === 'manager' || u.role === 'compliance'
                       ? <em>All groups</em>
                       : u.groups && u.groups.length > 0
                         ? u.groups.map((g) => g.group_name).join(', ')
@@ -118,11 +121,15 @@ export default function UsersPage() {
                   <td>{u.email}</td>
                   <td>{u.is_active ? 'Active' : 'Disabled'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn-link" onClick={() => setModalUser(u)}>Edit</button>
-                    {' | '}
-                    <button className="btn-link" onClick={() => handleToggleStatus(u)}>
-                      {u.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
+                    {!readOnly && (
+                      <>
+                        <button className="btn-link" onClick={() => setModalUser(u)}>Edit</button>
+                        {' | '}
+                        <button className="btn-link" onClick={() => handleToggleStatus(u)}>
+                          {u.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

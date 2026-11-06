@@ -47,15 +47,15 @@ function AppRoutes() {
         }
       >
         <Route index element={<DashboardPage />} />
-        <Route path="users" element={<RequireRole role="super_admin"><UsersPage /></RequireRole>} />
-        <Route path="agents" element={<RequireRole roles={["admin", "super_admin"]}><AgentsPage /></RequireRole>} />
+        <Route path="users" element={<RequireRole roles={["super_admin", "compliance"]}><UsersPage /></RequireRole>} />
+        <Route path="agents" element={<RequireRole roles={["admin", "super_admin", "compliance"]}><AgentsPage /></RequireRole>} />
         <Route path="recordings" element={<RecordingsPage />} />
-        <Route path="groups" element={<RequireRole role="super_admin"><GroupsPage /></RequireRole>} />
-        <Route path="groups/:groupId" element={<RequireRole role="super_admin"><GroupDetailPage /></RequireRole>} />
+        <Route path="groups" element={<RequireRole roles={["super_admin", "compliance"]}><GroupsPage /></RequireRole>} />
+        <Route path="groups/:groupId" element={<RequireRole roles={["super_admin", "compliance"]}><GroupDetailPage /></RequireRole>} />
         <Route path="reports" element={<ReportsPage />} />
-        <Route path="audit-log" element={<RequireRole role="super_admin"><AuditLogPage /></RequireRole>} />
-        <Route path="violations" element={<RequireRole roles={["admin", "super_admin"]}><ViolationsPage /></RequireRole>} />
-        <Route path="scheduler" element={<RequireRole roles={["admin", "super_admin"]}><SchedulerPage /></RequireRole>} />
+        <Route path="audit-log" element={<RequireRole roles={["super_admin", "compliance"]}><AuditLogPage /></RequireRole>} />
+        <Route path="violations" element={<RequireRole roles={["admin", "super_admin", "compliance"]}><ViolationsPage /></RequireRole>} />
+        <Route path="scheduler" element={<RequireRole roles={["admin", "super_admin", "compliance"]}><SchedulerPage /></RequireRole>} />
         <Route path="clinic-visits" element={<RequireRole roles={["clinic", "super_admin"]}><ClinicVisitsPage /></RequireRole>} />
         <Route path="desktop-updates" element={<RequireRole role="super_admin"><DesktopUpdatesPage /></RequireRole>} />
       </Route>

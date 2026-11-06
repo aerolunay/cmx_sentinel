@@ -3,8 +3,12 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../api.js';
 import RestrictionFormModal from '../modals/RestrictionFormModal.jsx';
 import CopyRestrictionsModal from '../modals/CopyRestrictionsModal.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
+import { isReadOnlyRole } from '../utils/roles.js';
 
 export default function GroupDetailPage() {
+  const { user } = useAuth();
+  const readOnly = isReadOnlyRole(user?.role);
   const { groupId } = useParams();
   const [groups, setGroups] = useState([]);
   const [restrictions, setRestrictions] = useState([]);
@@ -52,6 +56,7 @@ export default function GroupDetailPage() {
       <p><Link to="/groups">&larr; Back to Groups</Link></p>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>{group ? group.group_name : 'Group'} - Restrictions</h2>
+        {!readOnly && (
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             className="btn-secondary"
@@ -63,6 +68,7 @@ export default function GroupDetailPage() {
           </button>
           <button className="btn" onClick={() => setModalRestriction(null)}>+ Add Restriction</button>
         </div>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -89,9 +95,13 @@ export default function GroupDetailPage() {
                   <td>{r.path_prefix}</td>
                   <td>{r.is_active ? 'Active' : 'Disabled'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn-link" onClick={() => setModalRestriction(r)}>Edit</button>
-                    {' | '}
-                    <button className="btn-link" onClick={() => handleDelete(r)}>Delete</button>
+                    {!readOnly && (
+                      <>
+                        <button className="btn-link" onClick={() => setModalRestriction(r)}>Edit</button>
+                        {' | '}
+                        <button className="btn-link" onClick={() => handleDelete(r)}>Delete</button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))
