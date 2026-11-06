@@ -3,19 +3,19 @@
 const express = require("express");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
-const { requireRole } = require("../middleware/requireRole");
+const { requireRole, requireRoleOrReadOnly } = require("../middleware/requireRole");
 const { sendWelcomeEmail } = require("../services/emailService");
 const { GROUP_SCOPED_ROLES } = require("../services/groupScope");
 
 const router = express.Router();
 
-const VALID_ROLES = ["super_admin", "admin", "tqa", "supervisor", "manager", "clinic"];
+const VALID_ROLES = ["super_admin", "admin", "tqa", "supervisor", "manager", "clinic", "compliance"];
 const EMPLOYEE_ID_PATTERN = /^\d+$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Users management is super_admin-only - not even regular Admin can
-// reach this.
-router.use(requireAuth, requireRole("super_admin"));
+// reach this. Compliance can list users (read-only).
+router.use(requireAuth, requireRoleOrReadOnly(["super_admin"]));
 
 async function setUserGroups(userId, groupIds) {
   await db.query("DELETE FROM web_user_groups WHERE user_id = ?", [userId]);

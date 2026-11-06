@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import ScheduleFormModal from '../modals/ScheduleFormModal.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
+import { isReadOnlyRole } from '../utils/roles.js';
 
 const TEMPLATE_HEADERS = ['Agent ID', 'Agent Name', 'Shift Date', 'Shift Type', 'Start Time', 'End Time'];
 // One example row, purely illustrative - Agent Name here is for the
@@ -42,22 +44,27 @@ function defaultMonthRange() {
 }
 
 export default function SchedulerPage() {
-  const [tab, setTab] = useState('upload'); // 'upload' | 'schedules'
+  const { user } = useAuth();
+  // Compliance: Agent Schedules only, no uploads or edits.
+  const readOnly = isReadOnlyRole(user?.role);
+  const [tab, setTab] = useState(readOnly ? 'schedules' : 'upload'); // 'upload' | 'schedules'
 
   return (
     <>
       <h2 style={{ marginBottom: 16 }}>Shift Scheduler</h2>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, borderBottom: '1px solid #ddd' }}>
-        <button className={tab === 'upload' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('upload')}>
-          Mass Upload
-        </button>
+        {!readOnly && (
+          <button className={tab === 'upload' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('upload')}>
+            Mass Upload
+          </button>
+        )}
         <button className={tab === 'schedules' ? 'btn-tab active' : 'btn-tab'} onClick={() => setTab('schedules')}>
           Agent Schedules
         </button>
       </div>
 
-      {tab === 'upload' ? <MassUploadTab /> : <AgentSchedulesTab />}
+      {tab === 'upload' && !readOnly ? <MassUploadTab /> : <AgentSchedulesTab readOnly={readOnly} />}
     </>
   );
 }
@@ -146,7 +153,7 @@ function MassUploadTab() {
 // button that lets you pick the agent as part of adding, rather than
 // requiring you to search for an agent BEFORE seeing any schedule
 // data (the old two-tab split this replaces).
-function AgentSchedulesTab() {
+function AgentSchedulesTab({ readOnly }) {
   const [range, setRange] = useState(defaultMonthRange());
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState([]);
@@ -215,7 +222,7 @@ function AgentSchedulesTab() {
             />
           </div>
         </div>
-        <button className="btn" onClick={() => setModalShift(null)}>+ Add Shift</button>
+        {!readOnly && <button className="btn" onClick={() => setModalShift(null)}>+ Add Shift</button>}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -250,9 +257,13 @@ function AgentSchedulesTab() {
                   <td>{s.startTime}</td>
                   <td>{s.endTime}{s.crossesMidnight && <span title="Ends the next day"> (+1)</span>}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn-link" onClick={() => setModalShift(s)}>Edit</button>
-                    {' | '}
-                    <button className="btn-link" onClick={() => handleDelete(s)}>Delete</button>
+                    {!readOnly && (
+                      <>
+                        <button className="btn-link" onClick={() => setModalShift(s)}>Edit</button>
+                        {' | '}
+                        <button className="btn-link" onClick={() => handleDelete(s)}>Delete</button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

@@ -4,8 +4,12 @@ import AgentFormModal from '../modals/AgentFormModal.jsx';
 import AgentBulkUploadModal from '../modals/AgentBulkUploadModal.jsx';
 import SortableTh, { toggleSort } from '../components/SortableTh.jsx';
 import { sortRows, matchesSearch } from '../utils/tableSort.js';
+import { useAuth } from '../context/AuthContext.jsx';
+import { isReadOnlyRole } from '../utils/roles.js';
 
 export default function AgentsPage() {
+  const { user } = useAuth();
+  const readOnly = isReadOnlyRole(user?.role);
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -90,10 +94,12 @@ export default function AgentsPage() {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Agents</h2>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn-secondary" onClick={() => setShowBulkUpload(true)}>Bulk Upload</button>
-          <button className="btn" onClick={() => setModalAgent(null)}>+ Add Agent</button>
-        </div>
+        {!readOnly && (
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn-secondary" onClick={() => setShowBulkUpload(true)}>Bulk Upload</button>
+            <button className="btn" onClick={() => setModalAgent(null)}>+ Add Agent</button>
+          </div>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -137,19 +143,23 @@ export default function AgentsPage() {
                   <td>{a.is_active ? 'Active' : 'Disabled'}</td>
                   <td>{a.must_reset_password ? 'Yes' : 'No'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn-link" onClick={() => setModalAgent(a)}>Edit</button>
-                    {' | '}
-                    <button
-                      className="btn-link"
-                      onClick={() => handleResetPassword(a)}
-                      disabled={resettingId === a.agent_id}
-                    >
-                      {resettingId === a.agent_id ? 'Sending...' : 'Reset Password'}
-                    </button>
-                    {' | '}
-                    <button className="btn-link" onClick={() => handleToggleStatus(a)}>
-                      {a.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
+                    {!readOnly && (
+                      <>
+                        <button className="btn-link" onClick={() => setModalAgent(a)}>Edit</button>
+                        {' | '}
+                        <button
+                          className="btn-link"
+                          onClick={() => handleResetPassword(a)}
+                          disabled={resettingId === a.agent_id}
+                        >
+                          {resettingId === a.agent_id ? 'Sending...' : 'Reset Password'}
+                        </button>
+                        {' | '}
+                        <button className="btn-link" onClick={() => handleToggleStatus(a)}>
+                          {a.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

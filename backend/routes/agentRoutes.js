@@ -7,13 +7,14 @@ const multer = require("multer");
 const { parse } = require("csv-parse/sync");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
-const { requireRole } = require("../middleware/requireRole");
+const { requireRole, requireRoleOrReadOnly } = require("../middleware/requireRole");
 const { sendTempPasswordEmail } = require("../services/emailService");
 const { logAction } = require("../services/auditLog");
 
 const router = express.Router();
 
-router.use(requireAuth, requireRole("admin", "super_admin"));
+// Compliance: read-only (the agent list, no edits).
+router.use(requireAuth, requireRoleOrReadOnly(["admin", "super_admin"]));
 
 const EMPLOYEE_ID_PATTERN = /^\d+$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

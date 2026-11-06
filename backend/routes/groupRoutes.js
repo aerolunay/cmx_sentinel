@@ -3,7 +3,7 @@
 const express = require("express");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
-const { requireRole } = require("../middleware/requireRole");
+const { requireRole, requireRoleOrReadOnly } = require("../middleware/requireRole");
 const { logAction } = require("../services/auditLog");
 
 const router = express.Router();
@@ -14,7 +14,7 @@ router.use(requireAuth);
 // the agent edit form (agentRoutes.js allows that), which needs this
 // list for its dropdown. Everything else here (creating/renaming/
 // deleting groups, editing restrictions) stays Super Admin only.
-router.get("/", requireRole("admin", "super_admin"), async (req, res) => {
+router.get("/", requireRole("admin", "super_admin", "compliance"), async (req, res) => {
   try {
     // restriction_count is informational only (shown in GroupsPage's
     // table so an admin can tell at a glance which groups actually
@@ -36,7 +36,8 @@ router.get("/", requireRole("admin", "super_admin"), async (req, res) => {
   }
 });
 
-router.use(requireRole("super_admin"));
+// Compliance reads groups and restrictions (GET) but changes nothing.
+router.use(requireRoleOrReadOnly(["super_admin"]));
 
 router.post("/", async (req, res) => {
   const { groupName } = req.body || {};

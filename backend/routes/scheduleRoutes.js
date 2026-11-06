@@ -5,15 +5,15 @@ const multer = require("multer");
 const { parse } = require("csv-parse/sync");
 const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
-const { requireRole } = require("../middleware/requireRole");
+const { requireRole, requireRoleOrReadOnly } = require("../middleware/requireRole");
 const { logAction } = require("../services/auditLog");
 
 const router = express.Router();
 
 // Same access level as Agents - shift scheduling is an operational
 // admin function, not a reporting view (Reports/Recordings stay open
-// to TQA/Supervisor/Manager, this doesn't).
-router.use(requireAuth, requireRole("admin", "super_admin"));
+// to TQA/Supervisor/Manager, this doesn't). Compliance: read-only.
+router.use(requireAuth, requireRoleOrReadOnly(["admin", "super_admin"]));
 
 const SHIFT_TYPE_PATTERN = /^.{1,32}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;

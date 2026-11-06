@@ -2,8 +2,12 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import GroupFormModal from '../modals/GroupFormModal.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
+import { isReadOnlyRole } from '../utils/roles.js';
 
 export default function GroupsPage() {
+  const { user } = useAuth();
+  const readOnly = isReadOnlyRole(user?.role);
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -45,7 +49,7 @@ export default function GroupsPage() {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Groups &amp; Restrictions</h2>
-        <button className="btn" onClick={() => setModalGroup(null)}>+ Add Group</button>
+        {!readOnly && <button className="btn" onClick={() => setModalGroup(null)}>+ Add Group</button>}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -72,9 +76,13 @@ export default function GroupsPage() {
                   <td><Link to={`/groups/${g.group_id}`}>{g.group_name}</Link></td>
                   <td>{g.restriction_count}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn-link" onClick={() => setModalGroup(g)}>Rename</button>
-                    {' | '}
-                    <button className="btn-link" onClick={() => handleDelete(g)}>Delete</button>
+                    {!readOnly && (
+                      <>
+                        <button className="btn-link" onClick={() => setModalGroup(g)}>Rename</button>
+                        {' | '}
+                        <button className="btn-link" onClick={() => handleDelete(g)}>Delete</button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

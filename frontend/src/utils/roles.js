@@ -11,7 +11,15 @@ const ROLE_LABELS = {
   tqa: 'TQA',
   // Clinic staff - only see the Clinic Visits page.
   clinic: 'Med / Clinic',
+  compliance: 'Compliance',
 };
+
+// Roles that can open some pages read-only (Users, Agents, Groups &
+// Restrictions, Shift Scheduler) - pages hide their add/edit/delete
+// controls for them. The server enforces it too (requireRoleOrReadOnly).
+export function isReadOnlyRole(role) {
+  return role === 'compliance';
+}
 
 export function formatRole(role) {
   if (!role) return '';
