@@ -10,6 +10,7 @@ const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole, requireRoleOrReadOnly } = require("../middleware/requireRole");
 const { sendTempPasswordEmail } = require("../services/emailService");
 const { logAction } = require("../services/auditLog");
+const { defaultAdminAux } = require("../services/adminAux");
 
 const router = express.Router();
 
@@ -64,7 +65,7 @@ router.get("/", async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT a.agent_id, a.display_name, a.email, a.is_active, a.must_reset_password,
-              a.group_id, g.group_name
+              a.admin_aux_allowed, a.group_id, g.group_name
        FROM agents a
        LEFT JOIN agent_groups g ON g.group_id = a.group_id
        ORDER BY a.display_name ASC`
@@ -77,7 +78,7 @@ router.get("/", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const { agentId, displayName, email, groupId } = req.body || {};
+  const { agentId, displayName, email, groupId, adminAuxAllowed } = req.body || {};
 
   if (!agentId || !EMPLOYEE_ID_PATTERN.test(agentId.trim())) {
     return res.status(400).json({ error: "Agent ID must be numeric." });
@@ -103,10 +104,17 @@ router.post("/", async (req, res) => {
     // password at all (password_hash is NOT NULL in the schema).
     const placeholderHash = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 4);
 
+    // Admin Aux checkbox: as sent, or (not touched on the form) checked
+    // only for the Supervisors / Training and Quality / RRT groups and
+    // web users.
+    const resolvedAdminAux = typeof adminAuxAllowed === "boolean"
+      ? adminAuxAllowed
+      : await defaultAdminAux(trimmedAgentId, trimmedEmail, resolvedGroupId);
+
     await db.query(
-      `INSERT INTO agents (agent_id, display_name, email, password_hash, must_reset_password, is_active, group_id)
-       VALUES (?, ?, ?, ?, TRUE, TRUE, ?)`,
-      [trimmedAgentId, displayName.trim(), trimmedEmail, placeholderHash, resolvedGroupId]
+      `INSERT INTO agents (agent_id, display_name, email, password_hash, must_reset_password, is_active, group_id, admin_aux_allowed)
+       VALUES (?, ?, ?, ?, TRUE, TRUE, ?, ?)`,
+      [trimmedAgentId, displayName.trim(), trimmedEmail, placeholderHash, resolvedGroupId, resolvedAdminAux]
     );
 
     await issueTempPassword(trimmedAgentId, trimmedEmail);
@@ -120,6 +128,7 @@ router.post("/", async (req, res) => {
       email: trimmedEmail,
       isActive: true,
       mustResetPassword: true,
+      adminAuxAllowed: resolvedAdminAux,
       groupId: resolvedGroupId,
       message: `Agent created. Temporary password sent to ${trimmedEmail}.`,
     });
@@ -220,10 +229,12 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
         );
       } else {
         const placeholderHash = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 4);
+        // New agents only: existing ones keep their Admin Aux setting.
+        const adminAux = await defaultAdminAux(agentId, email, groupId);
         await db.query(
-          `INSERT INTO agents (agent_id, display_name, email, password_hash, must_reset_password, is_active, group_id)
-           VALUES (?, ?, ?, ?, TRUE, TRUE, ?)`,
-          [agentId, displayName, email, placeholderHash, groupId]
+          `INSERT INTO agents (agent_id, display_name, email, password_hash, must_reset_password, is_active, group_id, admin_aux_allowed)
+           VALUES (?, ?, ?, ?, TRUE, TRUE, ?, ?)`,
+          [agentId, displayName, email, placeholderHash, groupId, adminAux]
         );
         await issueTempPassword(agentId, email);
         await logAction(req, "created", "agent_credential", agentId,
@@ -248,7 +259,7 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
 // reset their credentials.
 router.put("/:agentId", async (req, res) => {
   const { agentId } = req.params;
-  const { displayName, email, groupId } = req.body || {};
+  const { displayName, email, groupId, adminAuxAllowed } = req.body || {};
 
   if (!displayName || !displayName.trim()) {
     return res.status(400).json({ error: "Enter a display name." });
@@ -260,14 +271,26 @@ router.put("/:agentId", async (req, res) => {
   const resolvedGroupId = groupId ? Number(groupId) : null;
 
   try {
-    const [result] = await db.query(
-      "UPDATE agents SET display_name = ?, email = ?, group_id = ? WHERE agent_id = ?",
-      [displayName.trim(), email.trim(), resolvedGroupId, agentId]
-    );
-    if (result.affectedRows === 0) {
+    const [[existing]] = await db.query("SELECT admin_aux_allowed FROM agents WHERE agent_id = ?", [agentId]);
+    if (!existing) {
       return res.status(404).json({ error: "Agent not found." });
     }
-    res.json({ agentId, displayName: displayName.trim(), email: email.trim(), groupId: resolvedGroupId });
+    // Admin Aux only changes when the form sends it - changing the group
+    // never checks or unchecks it on its own.
+    const resolvedAdminAux = typeof adminAuxAllowed === "boolean" ? adminAuxAllowed : Boolean(existing.admin_aux_allowed);
+
+    await db.query(
+      "UPDATE agents SET display_name = ?, email = ?, group_id = ?, admin_aux_allowed = ? WHERE agent_id = ?",
+      [displayName.trim(), email.trim(), resolvedGroupId, resolvedAdminAux, agentId]
+    );
+    if (resolvedAdminAux !== Boolean(existing.admin_aux_allowed)) {
+      await logAction(req, "updated", "agent_credential", agentId,
+        `Admin aux ${resolvedAdminAux ? "allowed" : "removed"} for agent ${displayName.trim()} (${agentId}).`);
+    }
+    res.json({
+      agentId, displayName: displayName.trim(), email: email.trim(), groupId: resolvedGroupId,
+      adminAuxAllowed: resolvedAdminAux,
+    });
   } catch (err) {
     console.error("Error updating agent:", err);
     res.status(500).json({ error: "A server error occurred." });
