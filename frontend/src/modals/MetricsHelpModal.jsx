@@ -39,9 +39,8 @@ export default function MetricsHelpModal({ onClose }) {
                 <thead><tr><th>Login hours</th><th>Allowance</th></tr></thead>
                 <tbody>
                   <tr><td>6h or less</td><td>0.5h</td></tr>
-                  <tr><td>over 6h, up to 9h</td><td>1h</td></tr>
-                  <tr><td>over 9h, up to 12h</td><td>1.5h</td></tr>
-                  <tr><td>over 12h</td><td>2h</td></tr>
+                  <tr><td>over 6h, up to 13h</td><td>1h</td></tr>
+                  <tr><td>over 13h</td><td>1.5h</td></tr>
                 </tbody>
               </table>
               Early in a shift Expected hours is never less than the login hours, up to the allowance (the login
@@ -80,7 +79,7 @@ export default function MetricsHelpModal({ onClose }) {
             <div className="metrics-example-title">Example - stayed late without overtime</div>
             Same 9h shift, but the agent stays logged in until 7:00 PM. Only the 9 scheduled hours count, so the
             allowance stays 1h and the extra 2 hours are left out of both sides. If 2h of overtime had been added to
-            the schedule, login hours would be 11h and the allowance 1.5h: 11 − 1.5 = 9.5 expected hours.
+            the schedule, login hours would be 11h with the same 1h allowance: 11 − 1 = 10 expected hours.
           </div>
           <div className="metrics-example" style={{ marginTop: 8 }}>
             <div className="metrics-example-title">Example - early in the shift</div>

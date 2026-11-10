@@ -28,13 +28,12 @@ const PRODUCTIVE_AUX_CODES = ["Production", "Admin", "Adhoc", "Coaching", "Meeti
 // time logged INSIDE the schedule - so it can never exceed the scheduled
 // hours, and overtime only counts once it's been added to the schedule.
 // The allowance grows with the login:
-//   <= 6h: 0.5h   > 6h-9h: 1h   > 9h-12h: 1.5h   > 12h: 2h
+//   <= 6h: 0.5h   > 6h-13h: 1h   > 13h: 1.5h
 function breakAllowanceSeconds(loginSeconds) {
   const hours = loginSeconds / 3600;
   if (hours <= 6) return 0.5 * 3600;
-  if (hours <= 9) return 1 * 3600;
-  if (hours <= 12) return 1.5 * 3600;
-  return 2 * 3600;
+  if (hours <= 13) return 1 * 3600;
+  return 1.5 * 3600;
 }
 
 // Non-productive = Idle + Bio Break + Lunch/Break beyond that same
