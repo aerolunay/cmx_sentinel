@@ -28,12 +28,19 @@ const PRODUCTIVE_AUX_CODES = ["Production", "Admin", "Adhoc", "Coaching", "Meeti
 // time logged INSIDE the schedule - so it can never exceed the scheduled
 // hours, and overtime only counts once it's been added to the schedule.
 // The allowance grows with the login:
-//   <= 6h: 0.5h   > 6h-13h: 1h   > 13h: 1.5h
+//   <= 6h: 0.5h   > 6h-13h: 1h   > 13h: 1h + an optional 0.5h
+// Taking the optional 0.5h or not changes neither Productive Hrs % nor
+// lunch/break adherence: Expected always uses the required allowance,
+// and Lunch + Break isn't over the allowance until it passes the
+// optional part too.
 function breakAllowanceSeconds(loginSeconds) {
   const hours = loginSeconds / 3600;
   if (hours <= 6) return 0.5 * 3600;
-  if (hours <= 13) return 1 * 3600;
-  return 1.5 * 3600;
+  return 1 * 3600;
+}
+
+function optionalBreakSeconds(loginSeconds) {
+  return loginSeconds / 3600 > 13 ? 0.5 * 3600 : 0;
 }
 
 // Non-productive = Idle + Bio Break + Lunch/Break beyond that same
@@ -48,9 +55,9 @@ function breakAllowanceSeconds(loginSeconds) {
 // expectedSeconds are exposed so dashboards/monthly totals can sum them
 // and divide once.
 function productiveHrs(auxSeconds, loginSeconds) {
-  const allowanceSeconds = loginSeconds > 0 ? breakAllowanceSeconds(loginSeconds) : 0;
   const lunchBreakSeconds = (auxSeconds.Lunch || 0) + (auxSeconds.Break || 0);
-  const excessBreakSeconds = Math.max(0, lunchBreakSeconds - allowanceSeconds);
+  const allowanceSeconds = loginSeconds > 0 ? breakAllowanceSeconds(loginSeconds) : 0;
+  const excessBreakSeconds = Math.max(0, lunchBreakSeconds - allowanceSeconds - optionalBreakSeconds(loginSeconds));
   const nonProductiveSeconds = (auxSeconds.Idle || 0) + (auxSeconds.BioBreak || 0) + excessBreakSeconds;
   const result = {
     allowanceSeconds,
@@ -99,7 +106,7 @@ function breakAdherence(auxSeconds, loginSeconds, shiftOver) {
     return { allowanceSeconds: 0, takenSeconds, overSeconds: 0, shortSeconds: 0, deviationSeconds: 0 };
   }
   const allowanceSeconds = breakAllowanceSeconds(loginSeconds);
-  const overSeconds = Math.max(0, takenSeconds - allowanceSeconds);
+  const overSeconds = Math.max(0, takenSeconds - allowanceSeconds - optionalBreakSeconds(loginSeconds));
   const shortfallSeconds = Math.max(0, allowanceSeconds - takenSeconds);
   const shortSeconds = shiftOver && shortfallSeconds >= BREAK_SHORT_LEEWAY_SECONDS ? shortfallSeconds : 0;
   return { allowanceSeconds, takenSeconds, overSeconds, shortSeconds, deviationSeconds: overSeconds + shortSeconds };
