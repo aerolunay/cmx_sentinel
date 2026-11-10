@@ -40,9 +40,13 @@ export default function MetricsHelpModal({ onClose }) {
                 <tbody>
                   <tr><td>6h or less</td><td>0.5h</td></tr>
                   <tr><td>over 6h, up to 13h</td><td>1h</td></tr>
-                  <tr><td>over 13h</td><td>1.5h</td></tr>
+                  <tr><td>over 13h</td><td>1h + optional 0.5h</td></tr>
                 </tbody>
               </table>
+              Over 13h, the extra 0.5h is optional: any Lunch + Break between 1h and 1.5h counts as allowance, so
+              taking it or not doesn't change Productive Hrs % or lunch/break adherence. Only time over 1.5h, or
+              under 1h, counts.
+              <br />
               Early in a shift Expected hours is never less than the login hours, up to the allowance (the login
               time for the first 30 minutes, then 30 minutes until Login − Allowance is larger) - e.g. 8 seconds of
               Idle in the first 20 minutes shows 99.3%, not 0%.
