@@ -30,7 +30,13 @@ const SQL_FORMAT = "yyyy-MM-dd HH:mm:ss";
 const EST_FORMAT = "%Y-%m-%d %H:%i:%s";
 const apply = process.argv.includes("--apply");
 
-async function firstCheckOut(agentId, fromUtc, toUtc) {
+// fromEst/toEst: Eastern wall-clock strings. punched_at is real UTC, so
+// the bounds are sent as UTC strings - a Date would be converted with
+// the server's own time zone (Manila on production) by mysql2.
+async function firstCheckOut(agentId, fromEst, toEst) {
+  const utc = (est) => DateTime.fromSQL(est, { zone: EASTERN }).toUTC().toFormat(SQL_FORMAT);
+  const fromUtc = utc(fromEst);
+  const toUtc = utc(toEst);
   const tables = ["ph_timekeeping.device_attendance_logs"];
   if (await hasColumn("biometric_punches", "punched_at")) tables.push("biometric_punches");
   let first = null;
@@ -72,9 +78,7 @@ async function main() {
 
   const fixes = [];
   for (const row of rows) {
-    const startedAt = new Date(row.started_at_utc);
-    const detectedAt = DateTime.fromSQL(row.detected_est, { zone: EASTERN }).toJSDate();
-    const checkOut = await firstCheckOut(row.agent_id, startedAt, detectedAt);
+    const checkOut = await firstCheckOut(row.agent_id, row.start_est, row.detected_est);
     if (checkOut) fixes.push({ ...row, checkOut });
   }
 
@@ -96,14 +100,18 @@ async function main() {
 
   let repaired = 0;
   for (const f of fixes) {
+    // Moved from the row's own start by the Eastern difference, so the
+    // *_utc column stays in whatever time zone it's written in.
+    const checkOutEst = est(f.checkOut);
     const [result] = await db.query(
       `UPDATE aux_events
-       SET ended_at_utc = GREATEST(started_at_utc, ?),
+       SET ended_at_utc = DATE_ADD(started_at_utc,
+             INTERVAL TIMESTAMPDIFF(MICROSECOND, started_at_est, GREATEST(started_at_est, ?)) MICROSECOND),
            ended_at_est = GREATEST(started_at_est, ?),
-           duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_utc, ?)),
+           duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_est, ?)),
            logout_trigger = 'biometric'${withNote ? ", logout_note = NULL" : ""}
        WHERE event_id = ? AND logout_trigger = 'overstayed'`,
-      [f.checkOut, est(f.checkOut), f.checkOut, f.event_id]
+      [checkOutEst, checkOutEst, checkOutEst, f.event_id]
     );
     if (result.affectedRows === 0) continue;
     await db.query("DELETE FROM auto_logouts WHERE auto_logout_id = ?", [f.auto_logout_id]);
