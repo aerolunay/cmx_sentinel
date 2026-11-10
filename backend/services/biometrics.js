@@ -48,6 +48,15 @@ const OVERSTAY_HOURS = 14;
 // handled long since.
 const LOOKBACK_HOURS = 72;
 const DOUBLE_LOGIN_MIN_HOURS = 4;
+// A second Check-In (double login or next-shift In) isn't acted on for
+// this long: agents who press In by mistake at the end of a shift
+// usually press Out within a minute or two to correct it. Before this,
+// the desktop's status check closed the shift and recorded the
+// violation the moment the wrong In arrived, and the correcting Out
+// came too late to undo it. Until it passes, the shift carries on as if
+// the second In hadn't happened; a Check-Out within it is an ordinary
+// end of the shift.
+const SECOND_IN_GRACE_MINUTES = 15;
 const OVERSTAY_TRIGGER = "overstayed";
 const DOUBLE_LOGIN_TRIGGER = "double_login";
 const DOUBLE_LOGIN_NOTE = "Automatic Logout - Double Login - Biometric Check-In instead of Check-Out";
@@ -121,6 +130,7 @@ async function loadPunches(agentId) {
 function shiftFromPunches(punches, now = new Date(), schedules = []) {
   const overstayMs = OVERSTAY_HOURS * 3600 * 1000;
   const doubleMs = DOUBLE_LOGIN_MIN_HOURS * 3600 * 1000;
+  const graceMs = SECOND_IN_GRACE_MINUTES * 60 * 1000;
   const hour = 3600 * 1000;
   // A Check-In at the open shift's (from openIn) NEXT scheduled shift.
   const isNextShiftIn = (at, openIn) => {
@@ -165,11 +175,28 @@ function shiftFromPunches(punches, now = new Date(), schedules = []) {
         punchedOutAt = p.at;
         doubleLogin = null;
       }
+    } else if (shiftStartedAt && previousShift && previousShift.reason === NO_LOGOUT_TRIGGER
+      && previousShift.secondInAt === shiftStartedAt && p.at - shiftStartedAt < graceMs) {
+      // Out right after what looked like the next shift's In: it was the
+      // end of the old shift, pressed In first by mistake.
+      lastShiftStartedAt = previousShift.shiftStartedAt;
+      punchedOutAt = p.at;
+      shiftStartedAt = null;
+      previousShift = null;
     } else if (shiftStartedAt || !punchedOutAt) {
       lastShiftStartedAt = shiftStartedAt;
       punchedOutAt = p.at;
       shiftStartedAt = null;
     }
+  }
+
+  // Within the grace period after a second In, still the shift before it.
+  if (doubleLogin && now - doubleLogin.secondInAt < graceMs) {
+    return { status: "in", shiftStartedAt: doubleLogin.shiftStartedAt, punchedOutAt: null, previousShift };
+  }
+  if (shiftStartedAt && previousShift && previousShift.reason === NO_LOGOUT_TRIGGER
+    && previousShift.secondInAt === shiftStartedAt && now - shiftStartedAt < graceMs) {
+    return { status: "in", shiftStartedAt: previousShift.shiftStartedAt, punchedOutAt: null, previousShift: null };
   }
 
   if (shiftStartedAt) {
@@ -368,6 +395,31 @@ async function closeOverstayedRemoteLogin(agentId) {
   })).closedCount;
 }
 
+// A PC that's on applies a Check-Out itself within seconds - the hourly
+// job only steps in once the punch is this old.
+const PC_OFF_CHECKOUT_DELAY_MINUTES = 15;
+
+// Ends the agent's open logins that started before the Check-Out, at the
+// Check-Out - what the desktop does itself when it's running
+// (logout_trigger 'biometric', /aux-events/close). No auto_logouts row.
+async function closeAtCheckOut(agentId, punchedOutAt) {
+  const closeEst = DateTime.fromJSDate(punchedOutAt).setZone(EASTERN).toFormat(SQL_FORMAT);
+  const [result] = await db.query(
+    `UPDATE aux_events
+     SET ended_at_utc = GREATEST(started_at_utc, ?),
+         ended_at_est = GREATEST(started_at_est, ?),
+         duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_utc, ?)),
+         logout_trigger = 'biometric'
+     WHERE agent_id = ? AND ended_at_utc IS NULL AND started_at_utc < ?`,
+    [punchedOutAt, closeEst, punchedOutAt, agentId, punchedOutAt]
+  );
+  if (result.affectedRows > 0) {
+    console.log(`Biometric Check-Out with the PC off: agent ${agentId}, ${result.affectedRows} open row(s) ` +
+      `closed at the Check-Out (${closeEst} ET).`);
+  }
+  return result.affectedRows;
+}
+
 // Hourly (autoLogout.js's job): overstayed shifts whose PC isn't asking -
 // switched off, or on a desktop build without these rules. The shift
 // starts at the biometric Check-In while one is open, unless the login
@@ -389,6 +441,15 @@ async function runOverstayCheck() {
       if (shift.status === "overstayed") {
         closed += (await closeOverstayedShift(agentId, shift.shiftStartedAt, { pushLogout: true })).closedCount;
       }
+    } else if (shift && shift.status === "out"
+      && Date.now() - shift.punchedOutAt >= PC_OFF_CHECKOUT_DELAY_MINUTES * 60 * 1000) {
+      // Punched out but the login is still open: the PC was shut down
+      // before the Check-Out (the usual end of a shift), so the desktop
+      // never saw it. End that login at the punch - an ordinary logout,
+      // not a violation. Before this it was left open and, 14 hours
+      // after the login, closed as an overstay by the WFH rule below.
+      await closeAtCheckOut(agentId, shift.punchedOutAt);
+      closed += await closeOverstayedRemoteLogin(agentId); // logins opened after the Check-Out
     } else {
       closed += await closeOverstayedRemoteLogin(agentId);
     }
