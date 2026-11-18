@@ -207,6 +207,28 @@ router.post("/aux-events/open", async (req, res) => {
     if (orphaned.affectedRows > 0) {
       console.warn(`Closed ${orphaned.affectedRows} unclosed aux segment(s) for agent ${agentId} on ${machineName} when it opened ${auxCode}.`);
     }
+    // Same for an earlier login of this agent that was never logged out -
+    // e.g. the app restarted and started a new login on the same PC
+    // (/session/claim only closes other PCs' rows). An agent has one login
+    // at a time, so it ends where this one starts; left open, it was later
+    // closed at the Check-Out or shift end and its time counted twice,
+    // alongside this login's (Total Hours over the schedule, Adherence
+    // over 100%). Same ORPHAN_CLOSE_MAX_HOURS limit as above.
+    const [superseded] = await db.query(
+      `UPDATE aux_events
+       SET ended_at_utc = GREATEST(started_at_utc, ?),
+           ended_at_est = GREATEST(started_at_est, ?),
+           duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_utc, ?))
+       WHERE agent_id = ? AND login_session_id <> ? AND ended_at_utc IS NULL
+         AND started_at_utc >= ?`,
+      [
+        startedAtUtcDate, startedAtEst, startedAtUtcDate, agentId, sessionId,
+        new Date(startedAtUtcDate.getTime() - ORPHAN_CLOSE_MAX_HOURS * 3600 * 1000),
+      ]
+    );
+    if (superseded.affectedRows > 0) {
+      console.warn(`Closed ${superseded.affectedRows} aux segment(s) of an earlier login for agent ${agentId} when ${machineName} opened ${auxCode}.`);
+    }
     // An aux switch arrives as /close then /open, each stamped on
     // arrival, so the moment between them belonged to no aux code and
     // was lost from adherence. If this login's previous segment closed
