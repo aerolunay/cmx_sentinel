@@ -404,6 +404,10 @@ const PC_OFF_CHECKOUT_DELAY_MINUTES = 15;
 // (logout_trigger 'biometric', /aux-events/close). No auto_logouts row.
 async function closeAtCheckOut(agentId, punchedOutAt) {
   const closeEst = DateTime.fromJSDate(punchedOutAt).setZone(EASTERN).toFormat(SQL_FORMAT);
+  // Only rows from this shift: one opened more than OVERSTAY_HOURS before
+  // the punch is a login left open days ago - ended here, all that time
+  // would be credited. It's left to the overstay rule (scheduled end).
+  const oldestRow = new Date(punchedOutAt.getTime() - OVERSTAY_HOURS * 3600 * 1000);
   // An open row with a later segment after it (a login that was never
   // logged out, followed by a new one) ends where that next segment
   // starts - ended at the Check-Out, its time would count twice. The
@@ -413,9 +417,9 @@ async function closeAtCheckOut(agentId, punchedOutAt) {
      FROM aux_events ae
      JOIN aux_events n ON n.agent_id = ae.agent_id
       AND (n.started_at_est > ae.started_at_est OR (n.started_at_est = ae.started_at_est AND n.event_id > ae.event_id))
-     WHERE ae.agent_id = ? AND ae.ended_at_utc IS NULL AND ae.started_at_utc < ?
+     WHERE ae.agent_id = ? AND ae.ended_at_utc IS NULL AND ae.started_at_utc < ? AND ae.started_at_utc >= ?
      GROUP BY ae.event_id`,
-    [agentId, punchedOutAt]
+    [agentId, punchedOutAt, oldestRow]
   );
   for (const row of superseded) {
     await db.query(
@@ -438,8 +442,8 @@ async function closeAtCheckOut(agentId, punchedOutAt) {
          ended_at_est = GREATEST(started_at_est, ?),
          duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_utc, ?)),
          logout_trigger = 'biometric'
-     WHERE agent_id = ? AND ended_at_utc IS NULL AND started_at_utc < ?`,
-    [punchedOutAt, closeEst, punchedOutAt, agentId, punchedOutAt]
+     WHERE agent_id = ? AND ended_at_utc IS NULL AND started_at_utc < ? AND started_at_utc >= ?`,
+    [punchedOutAt, closeEst, punchedOutAt, agentId, punchedOutAt, oldestRow]
   );
   if (result.affectedRows > 0) {
     console.log(`Biometric Check-Out with the PC off: agent ${agentId}, ${result.affectedRows} open row(s) ` +
