@@ -404,6 +404,34 @@ const PC_OFF_CHECKOUT_DELAY_MINUTES = 15;
 // (logout_trigger 'biometric', /aux-events/close). No auto_logouts row.
 async function closeAtCheckOut(agentId, punchedOutAt) {
   const closeEst = DateTime.fromJSDate(punchedOutAt).setZone(EASTERN).toFormat(SQL_FORMAT);
+  // An open row with a later segment after it (a login that was never
+  // logged out, followed by a new one) ends where that next segment
+  // starts - ended at the Check-Out, its time would count twice. The
+  // *_utc end moves from the row's own start by the Eastern difference.
+  const [superseded] = await db.query(
+    `SELECT ae.event_id, MIN(n.started_at_est) AS next_est
+     FROM aux_events ae
+     JOIN aux_events n ON n.agent_id = ae.agent_id
+      AND (n.started_at_est > ae.started_at_est OR (n.started_at_est = ae.started_at_est AND n.event_id > ae.event_id))
+     WHERE ae.agent_id = ? AND ae.ended_at_utc IS NULL AND ae.started_at_utc < ?
+     GROUP BY ae.event_id`,
+    [agentId, punchedOutAt]
+  );
+  for (const row of superseded) {
+    await db.query(
+      `UPDATE aux_events
+       SET ended_at_est = GREATEST(started_at_est, ?),
+           ended_at_utc = DATE_ADD(started_at_utc,
+             INTERVAL GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_est, ?)) SECOND),
+           duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, started_at_est, ?))
+       WHERE event_id = ? AND ended_at_utc IS NULL`,
+      [row.next_est, row.next_est, row.next_est, row.event_id]
+    );
+  }
+  if (superseded.length > 0) {
+    console.warn(`Agent ${agentId}: ${superseded.length} open row(s) of an earlier login ended where the next segment starts.`);
+  }
+
   const [result] = await db.query(
     `UPDATE aux_events
      SET ended_at_utc = GREATEST(started_at_utc, ?),
