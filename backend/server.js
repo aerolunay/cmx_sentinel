@@ -25,6 +25,7 @@ const clinicRoutes = require("./routes/clinicRoutes");
 const monitorRoutes = require("./routes/monitorRoutes");
 const monitorIngestRoutes = require("./routes/monitorIngestRoutes");
 const { startAutoLogoutJob } = require("./services/autoLogout");
+const { startRecordingCleanupJob } = require("./services/recordingCleanup");
 
 const app = express();
 
@@ -134,6 +135,7 @@ const server = app.listen(PORT, "127.0.0.1", () => {
   // Hourly: logins still open 6h after the shift ended are closed at the
   // scheduled end - see services/autoLogout.js.
   startAutoLogoutJob();
+  startRecordingCleanupJob(); // only with RECORDING_CLEANUP_JOB=1 in .env
 });
 // Node's default 5-minute limit per request is too short for uploading
 // a ~110 MB desktop installer over a slow connection (Desktop Updates).
