@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import LiveMonitorModal from '../modals/LiveMonitorModal.jsx';
 
@@ -26,6 +26,7 @@ export default function MonitorPage() {
   const [now, setNow] = useState(Date.now());
   const [watching, setWatching] = useState(null);
   const [search, setSearch] = useState('');
+  const loadRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,6 +42,7 @@ export default function MonitorPage() {
         if (!cancelled) setLoading(false);
       }
     }
+    loadRef.current = load;
     load();
     const refresh = setInterval(load, REFRESH_MS);
     const tick = setInterval(() => setNow(Date.now()), 30000);
@@ -50,6 +52,14 @@ export default function MonitorPage() {
       clearInterval(tick);
     };
   }, []);
+
+  // The server ends the session ~3s after the viewer closes - refresh
+  // just after that so the red dot goes away without waiting for the
+  // next 10s refresh.
+  function stopWatching() {
+    setWatching(null);
+    setTimeout(() => loadRef.current && loadRef.current(), 4000);
+  }
 
   const term = search.trim().toLowerCase();
   const shown = term
@@ -100,7 +110,17 @@ export default function MonitorPage() {
                 return (
                   <tr key={a.agentId}>
                     <td>
-                      <div>{a.displayName}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {a.beingMonitored && (
+                          <span
+                            className="live-dot"
+                            title="Active monitoring in progress"
+                            aria-label="Active monitoring in progress"
+                            role="img"
+                          />
+                        )}
+                        {a.displayName}
+                      </div>
                       <div style={{ fontSize: 12, color: '#666' }}>{a.agentId}</div>
                     </td>
                     <td>{a.groupName}</td>
@@ -116,9 +136,6 @@ export default function MonitorPage() {
                       >
                         Live monitoring
                       </button>
-                      {a.beingMonitored && (
-                        <span style={{ marginLeft: 8, fontSize: 12, color: '#c0392b' }}>being watched</span>
-                      )}
                     </td>
                   </tr>
                 );
@@ -128,7 +145,7 @@ export default function MonitorPage() {
         </table>
       )}
 
-      {watching && <LiveMonitorModal agent={watching} onClose={() => setWatching(null)} />}
+      {watching && <LiveMonitorModal agent={watching} onClose={stopWatching} />}
     </>
   );
 }

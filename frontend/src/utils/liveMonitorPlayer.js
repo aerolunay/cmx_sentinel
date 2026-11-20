@@ -1,40 +1,64 @@
 // Plays a live monitoring stream (see backend/services/liveMonitor.js)
-// in a <video> element with the browser's MediaSource API.
+// in a <video> element with the browser's MediaSource API - following
+// live, or replaying from a point in the session (at, ms epoch).
 //
 // The stream is framed as [type u8][length u32 BE][payload]:
-//   1 = init segment of a new ffmpeg run on the agent's PC -> reset the player
-//   2 = media fragment (starts on a keyframe, ~2s each)
+//   1 = init segment of an ffmpeg run on the agent's PC -> reset the player
+//   2 = [float64 BE: ms epoch the fragment reached the server][media fragment]
 //   3 = status JSON {status, message}
+//   4 = timeline JSON {startedAt, oldest, latest} (ms epoch)
 // The PC encodes H.264 baseline + AAC-LC, so the codec string is fixed.
 
 const MIME = 'video/mp4; codecs="avc1.42C01F, mp4a.40.2"';
 const FRAME_INIT = 1;
 const FRAME_MEDIA = 2;
 const FRAME_STATUS = 3;
-const MAX_LAG_SECONDS = 3; // further behind live than this -> jump to live
-const KEEP_SECONDS = 30; // buffer kept behind the playhead
+const FRAME_TIMELINE = 4;
+// Following live, play this far behind the newest video: the PC sends
+// ~2s fragments, so sitting any closer means stalling for each one.
+const LIVE_DELAY_SECONDS = 4;
+const LIVE_MAX_LAG_SECONDS = 10; // further behind than this -> catch up
+const KEEP_SECONDS = 120; // buffer kept behind the playhead
 
 export function liveMonitoringSupported() {
   return typeof window.MediaSource !== 'undefined' && window.MediaSource.isTypeSupported(MIME);
 }
 
 /**
- * Starts playing sessionId into video. onStatus(status, message) gets
- * 'waiting' | 'streaming' | 'paused' | 'ended' | 'error'. Returns a
- * stop() function.
+ * Plays sessionId into video. options:
+ *   at        - ms epoch to replay from; omit to follow live
+ *   onStatus(status, message) - 'waiting' | 'streaming' | 'paused' | 'ended' | 'error'
+ *   onTimeline({startedAt, oldest, latest})
+ * Returns { stop(), wallTime(), follow } - wallTime() is the ms epoch of
+ * what's on screen (null before anything plays); set follow = false to
+ * stop snapping to live (e.g. the user paused).
  */
-export function playLiveMonitor(sessionId, video, onStatus) {
+export function playLiveMonitor(sessionId, video, { at = null, onStatus = () => {}, onTimeline = () => {} } = {}) {
   const abort = new AbortController();
   let mediaSource = null;
   let sourceBuffer = null;
   let objectUrl = null;
-  let queue = [];
+  let queue = []; // {data, t} - t null for the init segment
+  let segments = []; // {start, end, t} - where each fragment landed in the buffer
   let generation = 0;
+
+  const controller = {
+    follow: at == null,
+    stop,
+    wallTime() {
+      const now = video.currentTime;
+      const seg = segments.find((s) => now >= s.start && now <= s.end + 0.25);
+      if (!seg) return null;
+      // t is when the fragment's last bit arrived - its end.
+      return seg.t - (seg.end - now) * 1000;
+    },
+  };
 
   function resetPlayer(init) {
     generation += 1;
     const myGeneration = generation;
-    queue = [init];
+    queue = [{ data: init, t: null }];
+    segments = [];
     sourceBuffer = null;
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     mediaSource = new MediaSource();
@@ -47,7 +71,7 @@ export function playLiveMonitor(sessionId, video, onStatus) {
         sourceBuffer.mode = 'segments';
         sourceBuffer.addEventListener('updateend', () => {
           if (myGeneration !== generation) return;
-          keepLive();
+          afterAppend();
           pump();
         });
         pump();
@@ -57,28 +81,59 @@ export function playLiveMonitor(sessionId, video, onStatus) {
     }, { once: true });
   }
 
+  let appending = null;
+
+  function bufferedEnd() {
+    const b = sourceBuffer && sourceBuffer.buffered;
+    return b && b.length ? b.end(b.length - 1) : 0;
+  }
+
   function pump() {
     if (!sourceBuffer || sourceBuffer.updating || queue.length === 0) return;
+    const item = queue.shift();
+    appending = { t: item.t, start: bufferedEnd() };
     try {
-      sourceBuffer.appendBuffer(queue.shift());
-    } catch (err) {
+      sourceBuffer.appendBuffer(item.data);
+    } catch {
       // QuotaExceeded or a decode error: drop what's queued, the next
       // fragment (a keyframe) carries on.
       queue = [];
+      appending = null;
     }
   }
 
-  function keepLive() {
-    const buffered = video.buffered;
-    if (buffered.length === 0) return;
-    const end = buffered.end(buffered.length - 1);
-    if (end - video.currentTime > MAX_LAG_SECONDS || video.currentTime < buffered.start(0)) {
-      video.currentTime = Math.max(buffered.start(buffered.length - 1), end - 0.5);
+  function afterAppend() {
+    if (appending && appending.t != null) {
+      const end = bufferedEnd();
+      if (end > appending.start) segments.push({ start: appending.start, end, t: appending.t });
     }
-    if (video.paused && !video.ended) video.play().catch(() => {});
+    appending = null;
+
+    const buffered = sourceBuffer.buffered;
+    if (buffered.length === 0) return;
     const start = buffered.start(0);
+    const end = buffered.end(buffered.length - 1);
+
+    if (controller.follow) {
+      const target = Math.max(start, end - LIVE_DELAY_SECONDS);
+      if (end - video.currentTime > LIVE_MAX_LAG_SECONDS || video.currentTime < start) {
+        video.currentTime = target;
+      }
+      if (video.paused && !video.ended) video.play().catch(() => {});
+    } else if (video.currentTime < start) {
+      video.currentTime = start;
+      // A replay starts playing on its own; a paused one stays paused.
+      if (video.paused && !controller.userPaused) video.play().catch(() => {});
+    } else if (video.paused && !controller.userPaused && segments.length <= 2) {
+      video.play().catch(() => {});
+    }
+
     if (video.currentTime - start > KEEP_SECONDS && !sourceBuffer.updating) {
-      try { sourceBuffer.remove(start, video.currentTime - 10); } catch { /* next time */ }
+      const cut = video.currentTime - 60;
+      try {
+        sourceBuffer.remove(start, cut);
+        segments = segments.filter((s) => s.end > cut);
+      } catch { /* next time */ }
     }
   }
 
@@ -87,17 +142,21 @@ export function playLiveMonitor(sessionId, video, onStatus) {
       resetPlayer(payload);
     } else if (type === FRAME_MEDIA) {
       if (!mediaSource) return; // no init yet
-      queue.push(payload);
+      const t = new DataView(payload.buffer, payload.byteOffset, 8).getFloat64(0);
+      queue.push({ data: payload.subarray(8), t });
       pump();
     } else if (type === FRAME_STATUS) {
       const { status, message } = JSON.parse(new TextDecoder().decode(payload));
-      if (status !== 'ping') onStatus(status, message);
+      onStatus(status, message);
+    } else if (type === FRAME_TIMELINE) {
+      onTimeline(JSON.parse(new TextDecoder().decode(payload)));
     }
   }
 
   (async () => {
     try {
-      const response = await fetch(`/api/monitor/sessions/${encodeURIComponent(sessionId)}/stream`, {
+      const query = at != null ? `?at=${Math.round(at)}` : '';
+      const response = await fetch(`/api/monitor/sessions/${encodeURIComponent(sessionId)}/stream${query}`, {
         credentials: 'include',
         signal: abort.signal,
       });
@@ -127,17 +186,19 @@ export function playLiveMonitor(sessionId, video, onStatus) {
         }
         pending = pending.slice(offset);
       }
-      onStatus('ended', 'The live session ended.');
+      if (!abort.signal.aborted) onStatus('ended', 'The live session ended.');
     } catch (err) {
       if (!abort.signal.aborted) onStatus('error', `The stream was interrupted: ${err.message}`);
     }
   })();
 
-  return function stop() {
+  function stop() {
     abort.abort();
     generation += 1;
     video.removeAttribute('src');
     video.load();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
-  };
+  }
+
+  return controller;
 }

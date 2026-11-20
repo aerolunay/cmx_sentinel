@@ -108,7 +108,12 @@ router.post("/agents/:agentId/start", async (req, res) => {
 });
 
 // The viewer's stream - see services/liveMonitor.js for the framing.
+// ?at=<ms epoch> replays from that point instead of following live.
 router.get("/sessions/:sessionId/stream", (req, res) => {
+  const at = req.query.at != null ? Number(req.query.at) : null;
+  if (at != null && !Number.isFinite(at)) {
+    return res.status(400).json({ error: "at must be a time in milliseconds." });
+  }
   if (!liveMonitor.getSession(req.params.sessionId)) {
     return res.status(404).json({ error: "This live monitoring session has ended." });
   }
@@ -118,7 +123,7 @@ router.get("/sessions/:sessionId/stream", (req, res) => {
     "X-Accel-Buffering": "no",
   });
   res.flushHeaders();
-  liveMonitor.attachViewer(req.params.sessionId, res);
+  liveMonitor.attachViewer(req.params.sessionId, res, at);
 });
 
 module.exports = router;
