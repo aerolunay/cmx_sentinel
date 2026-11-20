@@ -198,17 +198,20 @@ export default function GroupsPage() {
                   <td><Link to={`/groups/${g.group_id}`}>{g.group_name}</Link></td>
                   <td>{g.restriction_count}</td>
                   {flagCell(g, 'recording_enabled', 'recordingEnabled', 'Recordings', (
-                    <span style={{ marginLeft: 10 }}>
+                    // Fixed columns (box + "h" | days note) so every row
+                    // is the same width and the cells line up.
+                    <span style={{
+                      display: 'inline-grid', gridTemplateColumns: 'auto 64px', columnGap: 6,
+                      alignItems: 'center', marginLeft: 10, textAlign: 'left', verticalAlign: 'middle',
+                    }}>
                       <RetentionHoursInput
                         group={g}
                         disabled={readOnly || savingKey === `${g.group_id}:recording_retention_hours`}
                         onSave={(hours, problem) => handleHours(g, hours, problem)}
                       />
-                      {describeHours(g.recording_retention_hours) && (
-                        <span style={{ fontSize: 11, color: '#888', marginLeft: 4 }}>
-                          ({describeHours(g.recording_retention_hours)})
-                        </span>
-                      )}
+                      <span style={{ fontSize: 11, color: '#888' }}>
+                        {describeHours(g.recording_retention_hours) && `(${describeHours(g.recording_retention_hours)})`}
+                      </span>
                     </span>
                   ))}
                   {flagCell(g, 'monitoring_enabled', 'monitoringEnabled', 'Monitoring')}
