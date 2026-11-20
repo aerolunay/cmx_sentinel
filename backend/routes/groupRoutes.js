@@ -5,6 +5,27 @@ const db = require("../config/db");
 const { requireAuth } = require("../middleware/requireAuth");
 const { requireRole, requireRoleOrReadOnly } = require("../middleware/requireRole");
 const { logAction } = require("../services/auditLog");
+const { hasColumn } = require("../services/workSetup");
+const liveMonitor = require("../services/liveMonitor");
+
+// Per-group switches, ticked on the Add/Edit Group form:
+// - recording_enabled (sql/020): only agents in a group with it on are
+//   screen-recorded by the desktop - see services/groupRecording.js.
+// - monitoring_enabled (sql/021): only agents in a group with it on can
+//   be watched live from the Monitor page - see routes/monitorRoutes.js.
+// Until a column exists the switch reads as off and isn't saved.
+const GROUP_FLAGS = [
+  { column: "recording_enabled", bodyKey: "recordingEnabled", label: "recordings" },
+  { column: "monitoring_enabled", bodyKey: "monitoringEnabled", label: "monitoring" },
+];
+
+async function presentFlags() {
+  const present = [];
+  for (const flag of GROUP_FLAGS) {
+    if (await hasColumn("agent_groups", flag.column)) present.push(flag);
+  }
+  return present;
+}
 
 const router = express.Router();
 
@@ -21,15 +42,22 @@ router.get("/", requireRole("admin", "super_admin", "compliance"), async (req, r
     // have rules configured vs. empty placeholders) - full restriction
     // details are fetched separately per-group via GET /:groupId/restrictions
     // when that group's detail page is actually opened.
+    const present = await presentFlags();
+    const flagCols = GROUP_FLAGS.map((f) =>
+      `${present.includes(f) ? `g.${f.column}` : "FALSE"} AS ${f.column}`).join(", ");
     const [rows] = await db.query(`
-      SELECT g.group_id, g.group_name,
+      SELECT g.group_id, g.group_name, ${flagCols},
              COUNT(rp.restriction_id) AS restriction_count
       FROM agent_groups g
       LEFT JOIN restricted_paths rp ON rp.group_id = g.group_id
-      GROUP BY g.group_id, g.group_name
+      GROUP BY g.group_id
       ORDER BY g.group_name ASC
     `);
-    res.json(rows);
+    res.json(rows.map((r) => {
+      const out = { ...r };
+      for (const f of GROUP_FLAGS) out[f.column] = Boolean(r[f.column]);
+      return out;
+    }));
   } catch (err) {
     console.error("Error listing groups:", err);
     res.status(500).json({ error: "A server error occurred." });
@@ -46,9 +74,24 @@ router.post("/", async (req, res) => {
   }
 
   try {
-    const [result] = await db.query("INSERT INTO agent_groups (group_name) VALUES (?)", [groupName.trim()]);
-    await logAction(req, "created", "group", result.insertId, `Created group "${groupName.trim()}".`);
-    res.status(201).json({ group_id: result.insertId, group_name: groupName.trim(), restriction_count: 0 });
+    // New groups get each switch on unless its checkbox was unticked.
+    const present = await presentFlags();
+    const values = {};
+    for (const f of GROUP_FLAGS) values[f.column] = present.includes(f) && req.body?.[f.bodyKey] !== false;
+
+    const columns = ["group_name", ...present.map((f) => f.column)];
+    const [result] = await db.query(
+      `INSERT INTO agent_groups (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+      [groupName.trim(), ...present.map((f) => values[f.column])]
+    );
+    const summary = GROUP_FLAGS.map((f) => `${f.label} ${values[f.column] ? "enabled" : "disabled"}`).join(", ");
+    await logAction(req, "created", "group", result.insertId, `Created group "${groupName.trim()}" (${summary}).`);
+    res.status(201).json({
+      group_id: result.insertId,
+      group_name: groupName.trim(),
+      ...values,
+      restriction_count: 0,
+    });
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(409).json({ error: "A group with that name already exists." });
@@ -66,15 +109,42 @@ router.put("/:groupId", async (req, res) => {
   }
 
   try {
-    const [result] = await db.query("UPDATE agent_groups SET group_name = ? WHERE group_id = ?", [
-      groupName.trim(),
-      groupId,
-    ]);
-    if (result.affectedRows === 0) {
+    const [[before]] = await db.query("SELECT * FROM agent_groups WHERE group_id = ?", [groupId]);
+    if (!before) {
       return res.status(404).json({ error: "Group not found." });
     }
-    await logAction(req, "updated", "group", groupId, `Renamed group to "${groupName.trim()}".`);
-    res.json({ group_id: Number(groupId), group_name: groupName.trim() });
+
+    // A switch left out of the request (an older page) keeps its setting.
+    const present = await presentFlags();
+    const was = {};
+    const now = {};
+    for (const f of GROUP_FLAGS) {
+      was[f.column] = present.includes(f) ? Boolean(before[f.column]) : false;
+      now[f.column] = present.includes(f) && typeof req.body?.[f.bodyKey] === "boolean"
+        ? req.body[f.bodyKey]
+        : was[f.column];
+    }
+
+    const sets = ["group_name = ?", ...present.map((f) => `${f.column} = ?`)];
+    await db.query(`UPDATE agent_groups SET ${sets.join(", ")} WHERE group_id = ?`,
+      [groupName.trim(), ...present.map((f) => now[f.column]), groupId]);
+
+    const changes = [];
+    if (before.group_name !== groupName.trim()) changes.push(`renamed "${before.group_name}" to "${groupName.trim()}"`);
+    for (const f of GROUP_FLAGS) {
+      if (was[f.column] !== now[f.column]) changes.push(`${f.label} ${now[f.column] ? "enabled" : "disabled"}`);
+    }
+    if (changes.length > 0) {
+      await logAction(req, "updated", "group", groupId, `Group "${groupName.trim()}": ${changes.join(", ")}.`);
+    }
+
+    // Monitoring turned off: anyone in this group being watched stops now.
+    if (was.monitoring_enabled && !now.monitoring_enabled) {
+      const [members] = await db.query("SELECT agent_id FROM agents WHERE group_id = ?", [groupId]);
+      for (const m of members) liveMonitor.stopForAgent(m.agent_id, "Monitoring was turned off for this agent's group.");
+    }
+
+    res.json({ group_id: Number(groupId), group_name: groupName.trim(), ...now });
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(409).json({ error: "A group with that name already exists." });

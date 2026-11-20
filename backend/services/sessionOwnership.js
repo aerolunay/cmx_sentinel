@@ -140,4 +140,30 @@ function forceLogout(agentId, machineName, reason) {
   return pushed;
 }
 
-module.exports = { claim, attachConnection, detachConnection, release, hasOwner, forceLogout };
+/**
+ * Sends one event down the agent's live SSE connection without ending it
+ * (live monitoring start/stop - see services/liveMonitor.js). False when
+ * the agent's PC isn't connected right now.
+ */
+function push(agentId, event, data) {
+  const existing = entries.get(agentId);
+  if (!existing || !existing.res || existing.res.writableEnded) return false;
+  try {
+    existing.res.write(`event: ${event}
+data: ${JSON.stringify(data)}
+
+`);
+    return true;
+  } catch (err) {
+    console.error(`Error pushing ${event} to agent ${agentId}:`, err);
+    return false;
+  }
+}
+
+/** The machine holding a live SSE connection for the agent, or null. */
+function connectedMachine(agentId) {
+  const existing = entries.get(agentId);
+  return existing && existing.res && !existing.res.writableEnded ? existing.machineName : null;
+}
+
+module.exports = { claim, attachConnection, detachConnection, release, hasOwner, forceLogout, push, connectedMachine };

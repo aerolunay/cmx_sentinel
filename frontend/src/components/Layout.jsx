@@ -18,6 +18,7 @@ export default function Layout() {
   // path (the Dashboard home included) sends them there. The server
   // blocks the role from every other API too (server.js).
   const isClinic = user?.role === 'clinic';
+  const canMonitor = ['admin', 'super_admin', 'compliance', 'tqa'].includes(user?.role);
   const location = useLocation();
   const appVersion = useAppVersion();
   const [showAbout, setShowAbout] = useState(false);
@@ -79,6 +80,11 @@ export default function Layout() {
                     Violations
                   </NavLink>
                 </>
+              )}
+              {canMonitor && (
+                <NavLink to="/monitor" className={({ isActive }) => (isActive ? 'active' : '')}>
+                  Monitor
+                </NavLink>
               )}
               <NavLink to="/recordings" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Recordings

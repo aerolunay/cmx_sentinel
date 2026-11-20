@@ -63,22 +63,26 @@ export default function GroupsPage() {
               <th>Group ID</th>
               <th>Group Name</th>
               <th>Restrictions</th>
+              <th>Recordings</th>
+              <th>Monitoring</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {groups.length === 0 ? (
-              <tr><td colSpan={4}>No groups yet.</td></tr>
+              <tr><td colSpan={6}>No groups yet.</td></tr>
             ) : (
               groups.map((g) => (
                 <tr key={g.group_id}>
                   <td>{g.group_id}</td>
                   <td><Link to={`/groups/${g.group_id}`}>{g.group_name}</Link></td>
                   <td>{g.restriction_count}</td>
+                  <td>{g.recording_enabled === false ? 'Disabled' : 'Enabled'}</td>
+                  <td>{g.monitoring_enabled === false ? 'Disabled' : 'Enabled'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {!readOnly && (
                       <>
-                        <button className="btn-link" onClick={() => setModalGroup(g)}>Rename</button>
+                        <button className="btn-link" onClick={() => setModalGroup(g)}>Edit</button>
                         {' | '}
                         <button className="btn-link" onClick={() => handleDelete(g)}>Delete</button>
                       </>

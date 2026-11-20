@@ -22,6 +22,8 @@ const desktopUpdateRoutes = require("./routes/desktopUpdateRoutes");
 const biometricPunchRoutes = require("./routes/biometricPunchRoutes");
 const archiveRoutes = require("./routes/archiveRoutes");
 const clinicRoutes = require("./routes/clinicRoutes");
+const monitorRoutes = require("./routes/monitorRoutes");
+const monitorIngestRoutes = require("./routes/monitorIngestRoutes");
 const { startAutoLogoutJob } = require("./services/autoLogout");
 
 const app = express();
@@ -112,6 +114,10 @@ app.use("/api/desktop-sync", desktopSyncRoutes);
 app.use("/api/desktop-updates", desktopUpdateRoutes);
 // zk-sync (office PC): key auth, not a session - see the route's header.
 app.use("/api/biometric-punches", biometricPunchRoutes);
+app.use("/api/monitor", monitorRoutes);
+// Live monitoring upload from agent PCs - token per session, no login.
+// A long stream is cut at server.requestTimeout below; the PC reconnects.
+app.use("/api/monitor-ingest", monitorIngestRoutes);
 // Mounted at /archive, not /api/archive - shared-secret auth (not
 // session-based), called by scripts/archive_recordings.py running
 // somewhere outside this server entirely. See archiveRoutes.js's own

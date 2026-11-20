@@ -106,9 +106,15 @@ export const api = {
   }),
 
   listGroups: () => request('/api/groups'),
-  createGroup: (groupName) => request('/api/groups', { method: 'POST', body: JSON.stringify({ groupName }) }),
-  updateGroup: (groupId, groupName) =>
-    request(`/api/groups/${groupId}`, { method: 'PUT', body: JSON.stringify({ groupName }) }),
+  // flags: { recordingEnabled, monitoringEnabled }
+  createGroup: (groupName, flags = {}) =>
+    request('/api/groups', { method: 'POST', body: JSON.stringify({ groupName, ...flags }) }),
+  updateGroup: (groupId, groupName, flags = {}) =>
+    request(`/api/groups/${groupId}`, { method: 'PUT', body: JSON.stringify({ groupName, ...flags }) }),
+
+  listMonitorAgents: () => request('/api/monitor/agents'),
+  startLiveMonitor: (agentId) =>
+    request(`/api/monitor/agents/${encodeURIComponent(agentId)}/start`, { method: 'POST' }),
   deleteGroup: (groupId) => request(`/api/groups/${groupId}`, { method: 'DELETE' }),
 
   listRestrictions: (groupId) => request(`/api/groups/${groupId}/restrictions`),

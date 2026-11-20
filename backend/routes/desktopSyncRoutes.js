@@ -14,6 +14,7 @@ const { workSetupForIp, hasWorkSetupColumn } = require("../services/workSetup");
 const { sendInactivityAlertEmail } = require("../services/emailService");
 const { recordClient } = require("../services/desktopClients");
 const { isAdminAuxAllowed } = require("../services/adminAux");
+const { isRecordingEnabled } = require("../services/groupRecording");
 
 const router = express.Router();
 
@@ -40,6 +41,8 @@ router.post("/heartbeat", (req, res) => res.json({ ok: true }));
 
 // adminAuxAllowed (login and session recovery): the agent's "Admin Aux"
 // checkbox on the Agents page - see services/adminAux.js.
+// recordingEnabled (same two places): the "Enable recordings" checkbox of
+// the agent's group - see services/groupRecording.js.
 
 router.post("/auth/verify", async (req, res) => {
   const { agentId, password } = req.body || {};
@@ -75,6 +78,7 @@ router.post("/auth/verify", async (req, res) => {
       displayName: agent.display_name,
       mustResetPassword: Boolean(agent.must_reset_password),
       adminAuxAllowed: await isAdminAuxAllowed(agentId),
+      recordingEnabled: await isRecordingEnabled(agentId),
     });
   } catch (err) {
     console.error("Error verifying agent credentials:", err);
@@ -763,6 +767,7 @@ router.get("/session-recovery", async (req, res) => {
       currentSegmentStartedAtUtc: new Date(row.started_at_utc).toISOString(),
       sessionStartedAtUtc: new Date(sessionStartedAtUtc).toISOString(),
       adminAuxAllowed: await isAdminAuxAllowed(row.agent_id),
+      recordingEnabled: await isRecordingEnabled(row.agent_id),
     });
   } catch (err) {
     console.error("Error during session recovery lookup:", err);
