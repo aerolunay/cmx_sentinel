@@ -1,14 +1,17 @@
 "use strict";
 
-// Deletes screen recordings from S3 once they are more than 24 hours old,
-// except recordings of agents in the American Plan Administrators group,
-// which are kept.
+// Deletes screen recordings from S3 once they are older than their group's
+// retention: the hours set next to the Recordings tick box on the Groups &
+// Restrictions page (agent_groups.recording_retention_hours, sql/022).
+// 24 hours unless set otherwise; 0 for a group with recordings off, so
+// anything of theirs still in S3 is deleted on the next run.
 //
 // "Old" is measured from the recording time saved in the file name
 // (<name>_<agentId>_<yyMMddHHmmss>.mp4, Eastern - see recordingRoutes.js
-// parseRecordingKey), not from when the file reached S3. Whether an agent
-// is kept goes by the agent ID in the file name and the group that agent
-// is in when this runs.
+// parseRecordingKey), not from when the file reached S3. Which retention
+// applies goes by the agent ID in the file name and the group that agent
+// is in when this runs. Agents with no group, or no longer in the agents
+// table, get the default (--hours, 24 unless given).
 //
 // Deleted recordings are gone for good: they are not archived and the
 // Recordings page no longer lists them. Files that don't follow the
@@ -18,7 +21,7 @@
 //   node scripts/deleteOldRecordings.js
 //   node scripts/deleteOldRecordings.js --apply
 // Options:
-//   --hours=N   age limit in hours (default 24)
+//   --hours=N   retention for agents with no group (default 24)
 // Safe to re-run, e.g. hourly from cron:
 //   0 * * * * cd /path/to/backend && node scripts/deleteOldRecordings.js --apply >> logs/delete-recordings.log 2>&1
 
@@ -29,30 +32,36 @@ const { s3, BUCKET_NAME } = require("../config/s3");
 const db = require("../config/db");
 const { parseRecordingKey, listAllRecordingObjects } = require("../routes/recordingRoutes");
 
-const KEEP_GROUP_NAME = "American Plan Administrators";
 const apply = process.argv.includes("--apply");
 const hoursArg = process.argv.find((a) => a.startsWith("--hours="));
-const maxAgeHours = hoursArg ? Number(hoursArg.split("=")[1]) : 24;
+const defaultHours = hoursArg ? Number(hoursArg.split("=")[1]) : 24;
 
 function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
 
-// Agent IDs in the kept group. Throws if the group isn't there: a renamed
-// or missing group must stop the run, not delete that group's recordings.
-async function loadKeptAgentIds() {
-  const [groups] = await db.query(
-    "SELECT group_id, group_name FROM agent_groups WHERE LOWER(TRIM(group_name)) = LOWER(?)",
-    [KEEP_GROUP_NAME]
+// agentId -> { hours, group }. Stops the run before sql/022: without the
+// column every group would get the default and kept recordings (e.g. a
+// 3-month group) would be deleted after a day.
+async function loadRetention() {
+  const [[col]] = await db.query(
+    `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_groups' AND COLUMN_NAME = 'recording_retention_hours'`
   );
-  if (groups.length === 0) {
-    throw new Error(`No group named "${KEEP_GROUP_NAME}" - nothing deleted. Check the group's name on the Groups page.`);
+  if (!Number(col.n)) {
+    throw new Error("agent_groups.recording_retention_hours is missing - run sql/022 first. Nothing deleted.");
   }
-  const [agents] = await db.query(
-    "SELECT agent_id FROM agents WHERE group_id IN (?)",
-    [groups.map((g) => g.group_id)]
+  const [rows] = await db.query(
+    `SELECT a.agent_id, g.group_name, g.recording_retention_hours AS hours
+     FROM agents a LEFT JOIN agent_groups g ON g.group_id = a.group_id`
   );
-  return new Set(agents.map((a) => String(a.agent_id)));
+  const byAgent = new Map();
+  for (const r of rows) {
+    byAgent.set(String(r.agent_id), r.group_name == null
+      ? { hours: defaultHours, group: "(no group)" }
+      : { hours: Math.max(0, Number(r.hours) || 0), group: r.group_name });
+  }
+  return byAgent;
 }
 
 async function deleteKeys(keys) {
@@ -76,39 +85,45 @@ async function deleteKeys(keys) {
 }
 
 async function main() {
-  if (!Number.isFinite(maxAgeHours) || maxAgeHours < 1) {
-    throw new Error("--hours must be a number of at least 1.");
+  if (!Number.isInteger(defaultHours) || defaultHours < 1) {
+    throw new Error("--hours must be a whole number of at least 1.");
   }
 
-  const cutoff = new Date(Date.now() - maxAgeHours * 3600 * 1000);
-  log(`${apply ? "APPLY" : "PREVIEW"} | deleting recordings made before ${cutoff.toISOString()} ` +
-      `(${maxAgeHours}h), keeping "${KEEP_GROUP_NAME}".`);
+  const now = Date.now();
+  log(`${apply ? "APPLY" : "PREVIEW"} | each group's retention; ${defaultHours}h for agents with no group.`);
 
-  const keptAgentIds = await loadKeptAgentIds();
-  log(`${keptAgentIds.size} agent(s) in "${KEEP_GROUP_NAME}" - their recordings are kept.`);
-
+  const retention = await loadRetention();
   const objects = await listAllRecordingObjects();
   let kept = 0;
-  let recent = 0;
   let unparsed = 0;
   const toDelete = [];
+  const perGroup = new Map(); // group -> { hours, deleting, keeping }
+
   for (const obj of objects) {
     const parsed = parseRecordingKey(obj.Key);
     if (!parsed) {
       unparsed++;
       continue;
     }
-    if (new Date(parsed.recordedAt) >= cutoff) {
-      recent++;
-    } else if (keptAgentIds.has(String(parsed.agentId))) {
-      kept++;
-    } else {
+    const rule = retention.get(String(parsed.agentId)) || { hours: defaultHours, group: "(unknown agent)" };
+    const stats = perGroup.get(rule.group) || { hours: rule.hours, deleting: 0, keeping: 0 };
+    perGroup.set(rule.group, stats);
+
+    const ageHours = (now - new Date(parsed.recordedAt).getTime()) / 3600000;
+    if (ageHours >= rule.hours) {
       toDelete.push(obj.Key);
+      stats.deleting++;
+    } else {
+      kept++;
+      stats.keeping++;
     }
   }
 
-  log(`${objects.length} file(s) in S3: ${toDelete.length} to delete, ${recent} newer than ${maxAgeHours}h, ` +
-      `${kept} kept (${KEEP_GROUP_NAME}), ${unparsed} not named like a recording (left alone).`);
+  log(`${objects.length} file(s) in S3: ${toDelete.length} to delete, ${kept} kept, ` +
+      `${unparsed} not named like a recording (left alone).`);
+  for (const [group, s] of [...perGroup.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    log(`  ${group} (${s.hours}h): ${s.deleting} to delete, ${s.keeping} kept`);
+  }
 
   if (!apply) {
     toDelete.slice(0, 20).forEach((k) => log(`  would delete ${k}`));

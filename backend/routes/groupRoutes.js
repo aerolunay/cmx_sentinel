@@ -19,6 +19,31 @@ const GROUP_FLAGS = [
   { column: "monitoring_enabled", bodyKey: "monitoringEnabled", label: "monitoring" },
 ];
 
+// agent_groups.recording_retention_hours (sql/022): how long the group's
+// recordings stay in S3 before scripts/deleteOldRecordings.js purges them.
+// 24 by default; always 0 while recordings are off (nothing is kept).
+const RETENTION_COLUMN = "recording_retention_hours";
+const DEFAULT_RETENTION_HOURS = 24;
+const MAX_RETENTION_HOURS = 87600; // 10 years
+
+function hasRetentionColumn() {
+  return hasColumn("agent_groups", RETENTION_COLUMN);
+}
+
+// The hours sent by the page, or undefined if none was sent. Throws with
+// a message for the page if it's not a whole number in range.
+function requestedHours(body) {
+  const raw = body?.recordingRetentionHours;
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_RETENTION_HOURS) {
+    const err = new Error(`Enter how many hours to keep recordings: a whole number from 1 to ${MAX_RETENTION_HOURS.toLocaleString("en-US")}.`);
+    err.status = 400;
+    throw err;
+  }
+  return n;
+}
+
 async function presentFlags() {
   const present = [];
   for (const flag of GROUP_FLAGS) {
@@ -45,8 +70,11 @@ router.get("/", requireRole("admin", "super_admin", "compliance"), async (req, r
     const present = await presentFlags();
     const flagCols = GROUP_FLAGS.map((f) =>
       `${present.includes(f) ? `g.${f.column}` : "FALSE"} AS ${f.column}`).join(", ");
+    const retentionCol = (await hasRetentionColumn())
+      ? `g.${RETENTION_COLUMN}`
+      : `${present.some((f) => f.column === "recording_enabled") ? "IF(g.recording_enabled, 24, 0)" : "0"}`;
     const [rows] = await db.query(`
-      SELECT g.group_id, g.group_name, ${flagCols},
+      SELECT g.group_id, g.group_name, ${flagCols}, ${retentionCol} AS ${RETENTION_COLUMN},
              COUNT(rp.restriction_id) AS restriction_count
       FROM agent_groups g
       LEFT JOIN restricted_paths rp ON rp.group_id = g.group_id
@@ -56,6 +84,7 @@ router.get("/", requireRole("admin", "super_admin", "compliance"), async (req, r
     res.json(rows.map((r) => {
       const out = { ...r };
       for (const f of GROUP_FLAGS) out[f.column] = Boolean(r[f.column]);
+      out[RETENTION_COLUMN] = Number(r[RETENTION_COLUMN]) || 0;
       return out;
     }));
   } catch (err) {
@@ -79,12 +108,17 @@ router.post("/", async (req, res) => {
     const values = {};
     for (const f of GROUP_FLAGS) values[f.column] = present.includes(f) && req.body?.[f.bodyKey] !== false;
 
-    const columns = ["group_name", ...present.map((f) => f.column)];
+    const hasRetention = await hasRetentionColumn();
+    const hours = values.recording_enabled ? (requestedHours(req.body) ?? DEFAULT_RETENTION_HOURS) : 0;
+    values[RETENTION_COLUMN] = hours;
+
+    const columns = ["group_name", ...present.map((f) => f.column), ...(hasRetention ? [RETENTION_COLUMN] : [])];
     const [result] = await db.query(
       `INSERT INTO agent_groups (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
-      [groupName.trim(), ...present.map((f) => values[f.column])]
+      [groupName.trim(), ...present.map((f) => values[f.column]), ...(hasRetention ? [hours] : [])]
     );
-    const summary = GROUP_FLAGS.map((f) => `${f.label} ${values[f.column] ? "enabled" : "disabled"}`).join(", ");
+    const summary = GROUP_FLAGS.map((f) => `${f.label} ${values[f.column] ? "enabled" : "disabled"}`).join(", ") +
+      (values.recording_enabled ? `, recordings kept ${hours}h` : "");
     await logAction(req, "created", "group", result.insertId, `Created group "${groupName.trim()}" (${summary}).`);
     res.status(201).json({
       group_id: result.insertId,
@@ -93,6 +127,7 @@ router.post("/", async (req, res) => {
       restriction_count: 0,
     });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(409).json({ error: "A group with that name already exists." });
     }
@@ -125,15 +160,23 @@ router.put("/:groupId", async (req, res) => {
         : was[f.column];
     }
 
-    const sets = ["group_name = ?", ...present.map((f) => `${f.column} = ?`)];
+    // Hours: 0 while recordings are off. Turned on (or left on) with no
+    // hours sent: keep the current hours, or 24 if there were none.
+    const hasRetention = await hasRetentionColumn();
+    const wasHours = hasRetention ? Number(before[RETENTION_COLUMN]) || 0 : (was.recording_enabled ? DEFAULT_RETENTION_HOURS : 0);
+    const asked = requestedHours(req.body);
+    const nowHours = !now.recording_enabled ? 0 : (asked ?? (wasHours > 0 ? wasHours : DEFAULT_RETENTION_HOURS));
+
+    const sets = ["group_name = ?", ...present.map((f) => `${f.column} = ?`), ...(hasRetention ? [`${RETENTION_COLUMN} = ?`] : [])];
     await db.query(`UPDATE agent_groups SET ${sets.join(", ")} WHERE group_id = ?`,
-      [groupName.trim(), ...present.map((f) => now[f.column]), groupId]);
+      [groupName.trim(), ...present.map((f) => now[f.column]), ...(hasRetention ? [nowHours] : []), groupId]);
 
     const changes = [];
     if (before.group_name !== groupName.trim()) changes.push(`renamed "${before.group_name}" to "${groupName.trim()}"`);
     for (const f of GROUP_FLAGS) {
       if (was[f.column] !== now[f.column]) changes.push(`${f.label} ${now[f.column] ? "enabled" : "disabled"}`);
     }
+    if (hasRetention && wasHours !== nowHours) changes.push(`recordings kept ${wasHours}h -> ${nowHours}h`);
     if (changes.length > 0) {
       await logAction(req, "updated", "group", groupId, `Group "${groupName.trim()}": ${changes.join(", ")}.`);
     }
@@ -144,8 +187,9 @@ router.put("/:groupId", async (req, res) => {
       for (const m of members) liveMonitor.stopForAgent(m.agent_id, "Monitoring was turned off for this agent's group.");
     }
 
-    res.json({ group_id: Number(groupId), group_name: groupName.trim(), ...now });
+    res.json({ group_id: Number(groupId), group_name: groupName.trim(), ...now, [RETENTION_COLUMN]: nowHours });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(409).json({ error: "A group with that name already exists." });
     }
