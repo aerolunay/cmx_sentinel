@@ -30,6 +30,45 @@ export default function GroupsPage() {
     }
   }
 
+  // Ticking Recordings / Monitoring in the table saves straight away.
+  // Shown ticked at once; put back if the save fails. Recording changes
+  // reach an agent at their next desktop login; turning monitoring off
+  // ends any live view of the group's agents right away.
+  const [savingKey, setSavingKey] = useState(null);
+
+  async function handleToggle(group, column, bodyKey) {
+    const next = !group[column];
+    const key = `${group.group_id}:${column}`;
+    setError('');
+    setSavingKey(key);
+    setGroups((gs) => gs.map((g) => (g.group_id === group.group_id ? { ...g, [column]: next } : g)));
+    try {
+      await api.updateGroup(group.group_id, group.group_name, { [bodyKey]: next });
+    } catch (err) {
+      setGroups((gs) => gs.map((g) => (g.group_id === group.group_id ? { ...g, [column]: !next } : g)));
+      setError(`Could not update "${group.group_name}": ${err.message}`);
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  function FlagCell({ group, column, bodyKey, label }) {
+    const checked = group[column] !== false;
+    return (
+      <td style={{ textAlign: 'center' }}>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={readOnly || savingKey === `${group.group_id}:${column}`}
+          onChange={() => handleToggle(group, column, bodyKey)}
+          title={`${label} ${checked ? 'enabled' : 'disabled'} for ${group.group_name}`}
+          aria-label={`${label} for ${group.group_name}`}
+          style={{ width: 'auto', margin: 0, cursor: readOnly ? 'default' : 'pointer' }}
+        />
+      </td>
+    );
+  }
+
   async function handleDelete(group) {
     if (!window.confirm(
       `Delete "${group.group_name}"? This also deletes its ${group.restriction_count} restriction(s). Agents assigned to it will become unassigned, not deleted.`
@@ -63,8 +102,8 @@ export default function GroupsPage() {
               <th>Group ID</th>
               <th>Group Name</th>
               <th>Restrictions</th>
-              <th>Recordings</th>
-              <th>Monitoring</th>
+              <th style={{ textAlign: 'center' }}>Recordings</th>
+              <th style={{ textAlign: 'center' }}>Monitoring</th>
               <th></th>
             </tr>
           </thead>
@@ -77,8 +116,8 @@ export default function GroupsPage() {
                   <td>{g.group_id}</td>
                   <td><Link to={`/groups/${g.group_id}`}>{g.group_name}</Link></td>
                   <td>{g.restriction_count}</td>
-                  <td>{g.recording_enabled === false ? 'Disabled' : 'Enabled'}</td>
-                  <td>{g.monitoring_enabled === false ? 'Disabled' : 'Enabled'}</td>
+                  <FlagCell group={g} column="recording_enabled" bodyKey="recordingEnabled" label="Recordings" />
+                  <FlagCell group={g} column="monitoring_enabled" bodyKey="monitoringEnabled" label="Monitoring" />
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {!readOnly && (
                       <>
